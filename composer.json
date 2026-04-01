@@ -1,0 +1,51 @@
+{
+    "name": "itsjustvita/laravel-vector-tiles",
+    "description": "Serve Mapbox Vector Tiles directly from PostGIS in Laravel",
+    "keywords": ["laravel", "vector-tiles", "mvt", "postgis", "maplibre", "gis"],
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Vitalis Feist",
+            "email": "vitalis@itsjustvita.dev"
+        }
+    ],
+    "require": {
+        "php": "^8.4",
+        "illuminate/support": "^13.0",
+        "illuminate/database": "^13.0",
+        "illuminate/cache": "^13.0",
+        "illuminate/routing": "^13.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^11.0",
+        "pestphp/pest": "^3.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "ItsJustVita\\VectorTiles\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "ItsJustVita\\VectorTiles\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "ItsJustVita\\VectorTiles\\VectorTilesServiceProvider"
+            ],
+            "aliases": {
+                "VectorTiles": "ItsJustVita\\VectorTiles\\Facades\\VectorTiles"
+            }
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    }
+}
