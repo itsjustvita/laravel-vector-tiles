@@ -13,3 +13,9 @@ Route::prefix(config('vector-tiles.prefix', 'tiles'))
         Route::get('{layer}/{z}/{x}/{y}.mvt', TileController::class)
             ->where(['z' => '[0-9]{1,2}', 'x' => '[0-9]+', 'y' => '[0-9]+']);
     });
+
+Route::prefix(config('vector-tiles.geojson.prefix', 'geojson'))
+    ->middleware(config('vector-tiles.middleware', []))
+    ->group(function () {
+        Route::get('{layer}', \ItsJustVita\VectorTiles\Http\Controllers\GeoJsonController::class);
+    });
