@@ -29,6 +29,10 @@ class VectorTilesServiceProvider extends ServiceProvider
             $this->publishes([
                 __DIR__ . '/../config/vector-tiles.php' => config_path('vector-tiles.php'),
             ], 'vector-tiles-config');
+
+            $this->commands([
+                Commands\InstallCommand::class,
+            ]);
         }
 
         $this->loadRoutesFrom(__DIR__ . '/../routes/tiles.php');

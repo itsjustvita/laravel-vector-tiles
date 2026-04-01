@@ -3,11 +3,16 @@
 namespace ItsJustVita\VectorTiles;
 
 use Illuminate\Contracts\Foundation\Application;
+use ItsJustVita\VectorTiles\Drivers\TileDriverInterface;
+use ItsJustVita\VectorTiles\Helpers\MaplibreSourceHelper;
+use ItsJustVita\VectorTiles\Testing\FakeTileDriver;
 
 class VectorTileManager
 {
     /** @var array<string, Layer> */
     protected array $layers = [];
+
+    protected ?FakeTileDriver $fakeDriver = null;
 
     public function __construct(
         protected Application $app,
@@ -38,6 +43,29 @@ class VectorTileManager
         return $this->layers;
     }
 
+    public function maplibreSource(string $name): ?array
+    {
+        $layer = $this->getLayer($name);
+
+        if ($layer === null) {
+            return null;
+        }
+
+        return MaplibreSourceHelper::sourceForLayer($layer);
+    }
+
+    /** @return array<string, array> */
+    public function maplibreSources(): array
+    {
+        $sources = [];
+
+        foreach ($this->layers as $name => $layer) {
+            $sources[$name] = MaplibreSourceHelper::sourceForLayer($layer);
+        }
+
+        return $sources;
+    }
+
     public function loadConfigLayers(): void
     {
         $layers = $this->app['config']->get('vector-tiles.layers', []);
@@ -47,5 +75,29 @@ class VectorTileManager
                 $this->layers[$name] = Layer::fromConfig($name, $config);
             }
         }
+    }
+
+    public function fake(): void
+    {
+        $this->fakeDriver = new FakeTileDriver();
+        $this->app->instance(TileDriverInterface::class, $this->fakeDriver);
+    }
+
+    public function assertTileRequested(string $layer, int $z, int $x, int $y): void
+    {
+        if ($this->fakeDriver === null) {
+            throw new \RuntimeException('VectorTiles::fake() must be called before asserting.');
+        }
+
+        $this->fakeDriver->assertTileRequested($layer, $z, $x, $y);
+    }
+
+    public function assertTileNotRequested(string $layer, int $z, int $x, int $y): void
+    {
+        if ($this->fakeDriver === null) {
+            throw new \RuntimeException('VectorTiles::fake() must be called before asserting.');
+        }
+
+        $this->fakeDriver->assertTileNotRequested($layer, $z, $x, $y);
     }
 }
