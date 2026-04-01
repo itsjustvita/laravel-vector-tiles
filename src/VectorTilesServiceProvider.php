@@ -9,6 +9,10 @@ class VectorTilesServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->mergeConfigFrom(__DIR__ . '/../config/vector-tiles.php', 'vector-tiles');
+
+        $this->app->singleton(VectorTileManager::class, function ($app) {
+            return new VectorTileManager($app);
+        });
     }
 
     public function boot(): void
@@ -18,5 +22,7 @@ class VectorTilesServiceProvider extends ServiceProvider
                 __DIR__ . '/../config/vector-tiles.php' => config_path('vector-tiles.php'),
             ], 'vector-tiles-config');
         }
+
+        $this->app->make(VectorTileManager::class)->loadConfigLayers();
     }
 }
