@@ -4,6 +4,7 @@ namespace ItsJustVita\VectorTiles\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Pipeline\Pipeline;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\DB;
 use ItsJustVita\VectorTiles\VectorTileManager;
@@ -19,6 +20,16 @@ class GeoJsonController extends Controller
 
         if ($layerConfig === null) {
             abort(404, "Layer '{$layer}' not found.");
+        }
+
+        if (! empty($layerConfig->middleware)) {
+            $blocked = false;
+            app(Pipeline::class)
+                ->send($request)
+                ->through($layerConfig->middleware)
+                ->then(function () use (&$blocked) {
+                    $blocked = false;
+                });
         }
 
         $request->validate([
