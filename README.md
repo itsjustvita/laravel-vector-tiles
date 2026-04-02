@@ -26,12 +26,12 @@ Layers can be defined in `config/vector-tiles.php` for static definitions, or vi
 ```php
 // config/vector-tiles.php
 'layers' => [
-    'glasfaser_trassen' => [
-        'table' => 'trassen',
+    'buildings' => [
+        'table' => 'buildings',
         'geometry' => 'geom',
         'srid' => 4326,
-        'properties' => ['id', 'typ', 'status', 'ausbaustufe'],
-        'min_zoom' => 10,
+        'properties' => ['id', 'name', 'type', 'height'],
+        'min_zoom' => 12,
         'max_zoom' => 18,
     ],
 ],
@@ -43,11 +43,11 @@ Layers can be defined in `config/vector-tiles.php` for static definitions, or vi
 use ItsJustVita\VectorTiles\Facades\VectorTiles;
 
 // In a service provider's boot() method
-VectorTiles::layer('glasfaser_trassen')
-    ->from(Trasse::query()->where('status', 'aktiv'))
+VectorTiles::layer('buildings')
+    ->from(Building::query()->where('status', 'published'))
     ->geometry('geom')
-    ->properties(['id', 'typ', 'status', 'ausbaustufe'])
-    ->minZoom(10)
+    ->properties(['id', 'name', 'type', 'height'])
+    ->minZoom(12)
     ->maxZoom(18);
 ```
 
@@ -58,11 +58,11 @@ Tiles are served at `GET /tiles/{layer}/{z}/{x}/{y}.mvt`.
 Combine middleware for access control with scopes for per-user data filtering:
 
 ```php
-VectorTiles::layer('glasfaser_trassen')
-    ->from(Trasse::query())
+VectorTiles::layer('buildings')
+    ->from(Building::query())
     ->middleware(['auth:sanctum'])
     ->scope(fn (Builder $query, ?User $user) =>
-        $user?->isAdmin() ? $query : $query->where('kunde_id', $user?->kunde_id)
+        $user?->isAdmin() ? $query : $query->where('owner_id', $user?->id)
     );
 ```
 
@@ -71,9 +71,9 @@ VectorTiles::layer('glasfaser_trassen')
 Tile cache is automatically flushed when observed models change:
 
 ```php
-VectorTiles::layer('glasfaser_trassen')
-    ->from(Trasse::query())
-    ->invalidateOn(Trasse::class);
+VectorTiles::layer('buildings')
+    ->from(Building::query())
+    ->invalidateOn(Building::class);
 ```
 
 ### GeoJSON Endpoint
@@ -89,8 +89,8 @@ GET /geojson/{layer}?bbox=9.0,48.0,9.5,48.5&limit=500
 Generate source configuration for MapLibre GL JS:
 
 ```php
-$source = VectorTiles::maplibreSource('glasfaser_trassen');
-// Returns: ['type' => 'vector', 'tiles' => [...], 'minzoom' => 10, 'maxzoom' => 18]
+$source = VectorTiles::maplibreSource('buildings');
+// Returns: ['type' => 'vector', 'tiles' => [...], 'minzoom' => 12, 'maxzoom' => 18]
 
 $allSources = VectorTiles::maplibreSources();
 ```
@@ -117,10 +117,10 @@ use ItsJustVita\VectorTiles\Facades\VectorTiles;
 
 VectorTiles::fake();
 
-$response = $this->get('/tiles/trassen/14/8532/5765.mvt');
+$response = $this->get('/tiles/buildings/14/8532/5765.mvt');
 $response->assertOk();
 
-VectorTiles::assertTileRequested('trassen', 14, 8532, 5765);
+VectorTiles::assertTileRequested('buildings', 14, 8532, 5765);
 ```
 
 ## How It Works
