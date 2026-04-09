@@ -1,0 +1,12 @@
+name: laravel-vector-tiles
+type: php
+docroot: ""
+php_version: "8.4"
+webserver_type: nginx-fpm
+xdebug_enabled: false
+disable_settings_management: true
+composer_version: "2"
+web_environment: []
+database:
+  type: postgres
+  version: "16"
