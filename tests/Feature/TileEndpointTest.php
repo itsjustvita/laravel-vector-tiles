@@ -63,3 +63,55 @@ it('serves cached tile on second request', function () {
     $this->get('/tiles/trassen/14/8532/5765.mvt')
         ->assertOk();
 });
+
+it('applies default throttle middleware to tile routes', function () {
+    $route = collect($this->app['router']->getRoutes())
+        ->first(fn ($r) => $r->uri() === 'tiles/{layer}/{z}/{x}/{y}.mvt');
+
+    expect($route)->not->toBeNull();
+    expect($route->gatherMiddleware())->toContain('throttle:60,1');
+});
+
+it('applies default throttle middleware to geojson routes', function () {
+    $route = collect($this->app['router']->getRoutes())
+        ->first(fn ($r) => $r->uri() === 'geojson/{layer}');
+
+    expect($route)->not->toBeNull();
+    expect($route->gatherMiddleware())->toContain('throttle:60,1');
+});
+
+it('uses cache.ttl from config for Cache-Control max-age', function () {
+    config()->set('vector-tiles.cache.ttl', 7200);
+
+    $driver = Mockery::mock(\ItsJustVita\VectorTiles\Drivers\TileDriverInterface::class);
+    $driver->shouldReceive('getTile')->andReturn('fake_tile');
+    app()->instance(\ItsJustVita\VectorTiles\Drivers\TileDriverInterface::class, $driver);
+
+    $this->get('/tiles/trassen/14/8532/5765.mvt')
+        ->assertOk()
+        ->assertHeader('Cache-Control', 'max-age=7200, public');
+});
+
+it('uses cors.allowed_origins from config for CORS header', function () {
+    config()->set('vector-tiles.cors.allowed_origins', 'https://maps.example.com');
+
+    $driver = Mockery::mock(\ItsJustVita\VectorTiles\Drivers\TileDriverInterface::class);
+    $driver->shouldReceive('getTile')->andReturn('fake_tile');
+    app()->instance(\ItsJustVita\VectorTiles\Drivers\TileDriverInterface::class, $driver);
+
+    $this->get('/tiles/trassen/14/8532/5765.mvt')
+        ->assertOk()
+        ->assertHeader('Access-Control-Allow-Origin', 'https://maps.example.com');
+});
+
+it('omits CORS header when cors.allowed_origins is null', function () {
+    config()->set('vector-tiles.cors.allowed_origins', null);
+
+    $driver = Mockery::mock(\ItsJustVita\VectorTiles\Drivers\TileDriverInterface::class);
+    $driver->shouldReceive('getTile')->andReturn('fake_tile');
+    app()->instance(\ItsJustVita\VectorTiles\Drivers\TileDriverInterface::class, $driver);
+
+    $response = $this->get('/tiles/trassen/14/8532/5765.mvt')->assertOk();
+
+    expect($response->headers->has('Access-Control-Allow-Origin'))->toBeFalse();
+});

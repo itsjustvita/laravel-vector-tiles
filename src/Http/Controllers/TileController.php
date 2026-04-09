@@ -42,11 +42,19 @@ class TileController extends Controller
 
     protected function tileResponse(string $tile): Response
     {
-        return new Response($tile, 200, [
+        $ttl = (int) config('vector-tiles.cache.ttl', 3600);
+
+        $headers = [
             'Content-Type' => 'application/vnd.mapbox-vector-tile',
             'Content-Encoding' => 'identity',
-            'Cache-Control' => 'public, max-age=3600',
-            'Access-Control-Allow-Origin' => '*',
-        ]);
+            'Cache-Control' => "public, max-age={$ttl}",
+        ];
+
+        $corsOrigin = config('vector-tiles.cors.allowed_origins');
+        if ($corsOrigin !== null && $corsOrigin !== '') {
+            $headers['Access-Control-Allow-Origin'] = $corsOrigin;
+        }
+
+        return new Response($tile, 200, $headers);
     }
 }

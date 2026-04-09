@@ -1,12 +1,18 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use ItsJustVita\VectorTiles\Http\Controllers\GeoJsonController;
 use ItsJustVita\VectorTiles\Http\Controllers\TileController;
 use ItsJustVita\VectorTiles\Http\Middleware\ValidateTileRequest;
 
+$globalMiddleware = config('vector-tiles.middleware', []);
+$throttle = config('vector-tiles.throttle');
+$throttleMiddleware = $throttle ? ['throttle:'.$throttle] : [];
+
 Route::prefix(config('vector-tiles.prefix', 'tiles'))
     ->middleware(array_merge(
-        config('vector-tiles.middleware', []),
+        $globalMiddleware,
+        $throttleMiddleware,
         [ValidateTileRequest::class],
     ))
     ->group(function () {
@@ -15,7 +21,7 @@ Route::prefix(config('vector-tiles.prefix', 'tiles'))
     });
 
 Route::prefix(config('vector-tiles.geojson.prefix', 'geojson'))
-    ->middleware(config('vector-tiles.middleware', []))
+    ->middleware(array_merge($globalMiddleware, $throttleMiddleware))
     ->group(function () {
-        Route::get('{layer}', \ItsJustVita\VectorTiles\Http\Controllers\GeoJsonController::class);
+        Route::get('{layer}', GeoJsonController::class);
     });

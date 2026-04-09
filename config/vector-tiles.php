@@ -21,6 +21,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Rate Limiting
+    |--------------------------------------------------------------------------
+    |
+    | Throttle definition applied to tile and geojson routes as
+    | "throttle:{value}". Set to null or false to disable.
+    |
+    | Examples:
+    |   '60,1'      => 60 requests per minute
+    |   'api'       => named limiter from a RateLimiter::for() definition
+    |
+    */
+    'throttle' => '60,1',
+
+    /*
+    |--------------------------------------------------------------------------
     | Cache Settings
     |--------------------------------------------------------------------------
     */
@@ -28,6 +43,20 @@ return [
         'enabled' => true,
         'store' => null,
         'ttl' => 3600,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | CORS
+    |--------------------------------------------------------------------------
+    |
+    | Value sent as the Access-Control-Allow-Origin response header.
+    | Set to null to omit the header entirely and let a dedicated CORS
+    | middleware handle it.
+    |
+    */
+    'cors' => [
+        'allowed_origins' => '*',
     ],
 
     /*
