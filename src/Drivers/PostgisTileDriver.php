@@ -5,6 +5,7 @@ namespace ItsJustVita\VectorTiles\Drivers;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 use ItsJustVita\VectorTiles\Layer;
 
 class PostgisTileDriver implements TileDriverInterface
@@ -15,87 +16,53 @@ class PostgisTileDriver implements TileDriverInterface
 
     public function getTile(Layer $layer, int $z, int $x, int $y, ?Authenticatable $user = null): ?string
     {
-        $table = $layer->getTable();
-        $geometry = $layer->geometry;
-        $extent = $layer->extent;
-        $buffer = $layer->buffer;
-        $properties = $this->buildPropertyColumns($layer->properties);
-
         $connection = $this->db->connection($layer->connection);
+        $grammar = $connection->getQueryGrammar();
 
-        // Collect extra WHERE clauses and bindings
-        $extraWhere = '';
-        $extraBindings = [];
+        $query = $this->buildBaseQuery($layer, $connection);
 
-        // From Eloquent Builder source
-        if ($layer->source instanceof EloquentBuilder) {
-            $base = $layer->source->toBase();
-            $rawBindings = $base->getRawBindings();
-            foreach ($base->wheres as $where) {
-                if ($where['type'] === 'Basic') {
-                    $extraWhere .= " AND \"{$where['column']}\" {$where['operator']} ?";
-                }
-            }
-            $extraBindings = array_merge($extraBindings, $rawBindings['where'] ?? []);
-        }
-
-        // From scope closure (receives a query builder + user)
         if ($layer->scope !== null) {
-            $scopeQuery = $connection->table($table);
-            ($layer->scope)($scopeQuery, $user);
-            foreach ($scopeQuery->wheres ?? [] as $where) {
-                if ($where['type'] === 'Basic') {
-                    $extraWhere .= " AND \"{$where['column']}\" {$where['operator']} ?";
-                }
-            }
-            $extraBindings = array_merge($extraBindings, $scopeQuery->getBindings());
+            ($layer->scope)($query, $user);
         }
 
-        // Build the full ST_AsMVT SQL
-        $propertySql = $properties ? ", {$properties}" : '';
-        $spatialWhere = "ST_Intersects(ST_Transform(\"{$geometry}\", 3857), ST_TileEnvelope(?, ?, ?))";
+        $wrappedGeom = $grammar->wrap($layer->geometry);
 
-        $sql = <<<SQL
-            SELECT ST_AsMVT(tile, ?) AS tile
-            FROM (
-                SELECT
-                    ST_AsMVTGeom(
-                        ST_Transform("{$geometry}", 3857),
-                        ST_TileEnvelope(?, ?, ?),
-                        {$extent},
-                        {$buffer},
-                        true
-                    ) AS geom{$propertySql}
-                FROM "{$table}"
-                WHERE {$spatialWhere}{$extraWhere}
-            ) AS tile
-            SQL;
-
-        $bindings = array_merge(
-            [$layer->name],     // ST_AsMVT layer name
-            [$z, $x, $y],      // ST_TileEnvelope for ST_AsMVTGeom
-            [$z, $x, $y],      // ST_TileEnvelope for ST_Intersects
-            $extraBindings,     // Eloquent + scope bindings
+        $query->select([]);
+        $query->selectRaw(
+            "ST_AsMVTGeom(ST_Transform({$wrappedGeom}, 3857), ST_TileEnvelope(?, ?, ?), ?, ?, true) AS geom",
+            [$z, $x, $y, $layer->extent, $layer->buffer],
         );
+
+        if (! empty($layer->properties)) {
+            $query->addSelect($layer->properties);
+        }
+
+        $query->whereRaw(
+            "ST_Intersects(ST_Transform({$wrappedGeom}, 3857), ST_TileEnvelope(?, ?, ?))",
+            [$z, $x, $y],
+        );
+
+        $innerSql = $query->toSql();
+        $innerBindings = $query->getBindings();
+
+        $sql = "SELECT ST_AsMVT(tile, ?) AS tile FROM ({$innerSql}) AS tile";
+        $bindings = array_merge([$layer->name], $innerBindings);
 
         $result = $connection->selectOne($sql, $bindings);
 
-        if ($result === null || $result->tile === null) {
-            return null;
-        }
-
-        return $result->tile;
+        return $result?->tile;
     }
 
-    protected function buildPropertyColumns(array $properties): string
+    protected function buildBaseQuery(Layer $layer, $connection): QueryBuilder
     {
-        if (empty($properties)) {
-            return '';
+        if ($layer->source instanceof EloquentBuilder) {
+            return clone $layer->source->toBase();
         }
 
-        return implode(', ', array_map(
-            fn (string $col) => "\"{$col}\"",
-            $properties,
-        ));
+        if (is_string($layer->source)) {
+            return $connection->table($layer->source);
+        }
+
+        return $connection->table($layer->name);
     }
 }
