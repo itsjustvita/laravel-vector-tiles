@@ -32,35 +32,64 @@ it('returns 404 for unknown layer', function () {
 });
 
 it('returns geojson response with correct structure', function () {
-    $connection = Mockery::mock(\Illuminate\Database\Connection::class);
-    $connection->shouldReceive('select')->andReturn([]);
-
-    \Illuminate\Support\Facades\DB::shouldReceive('connection')
-        ->with(null)
-        ->andReturn($connection);
-
-    $this->getJson('/geojson/trassen?bbox=9.0,48.0,9.5,48.5')
-        ->assertOk()
-        ->assertHeader('Content-Type', 'application/geo+json')
-        ->assertJsonStructure(['type', 'features']);
+    \Illuminate\Support\Facades\DB::pretend(function () {
+        $this->getJson('/geojson/trassen?bbox=9.0,48.0,9.5,48.5')
+            ->assertOk()
+            ->assertHeader('Content-Type', 'application/geo+json')
+            ->assertJsonStructure(['type', 'features']);
+    });
 });
 
 it('caps limit at max_limit from config', function () {
     config()->set('vector-tiles.geojson.max_limit', 100);
 
-    $connection = Mockery::mock(\Illuminate\Database\Connection::class);
-    $connection->shouldReceive('select')
-        ->withArgs(function (string $sql, array $bindings) {
-            // Last binding is the limit, should be capped at 100
-            expect(end($bindings))->toBe(100);
-            return true;
-        })
-        ->andReturn([]);
+    $queries = \Illuminate\Support\Facades\DB::pretend(function () {
+        $this->getJson('/geojson/trassen?bbox=9.0,48.0,9.5,48.5&limit=9999')
+            ->assertOk();
+    });
 
-    \Illuminate\Support\Facades\DB::shouldReceive('connection')
-        ->with(null)
-        ->andReturn($connection);
+    expect($queries[0]['query'])->toMatch('/limit\s+100/i');
+});
 
-    $this->getJson('/geojson/trassen?bbox=9.0,48.0,9.5,48.5&limit=9999')
-        ->assertOk();
+it('preserves whereIn constraints from eloquent source', function () {
+    $model = new class extends \Illuminate\Database\Eloquent\Model
+    {
+        protected $table = 'trassen_table';
+
+        protected $guarded = [];
+    };
+
+    VectorTiles::layer('filtered')
+        ->from($model->newQuery()->whereIn('status', ['aktiv', 'geplant']))
+        ->properties(['id']);
+
+    $queries = \Illuminate\Support\Facades\DB::pretend(function () {
+        $this->getJson('/geojson/filtered?bbox=9.0,48.0,9.5,48.5')->assertOk();
+    });
+
+    expect($queries[0]['query'])->toContain("'aktiv'");
+    expect($queries[0]['query'])->toContain("'geplant'");
+});
+
+it('applies scope closure constraints', function () {
+    VectorTiles::layer('scoped')
+        ->from('trassen_table')
+        ->scope(function ($query) {
+            $query->where('owner_id', 42);
+        });
+
+    $queries = \Illuminate\Support\Facades\DB::pretend(function () {
+        $this->getJson('/geojson/scoped?bbox=9.0,48.0,9.5,48.5')->assertOk();
+    });
+
+    expect($queries[0]['query'])->toContain('"owner_id" = 42');
+});
+
+it('blocks geojson requests when layer middleware rejects the request', function () {
+    VectorTiles::layer('protected')
+        ->from('trassen_table')
+        ->middleware([\ItsJustVita\VectorTiles\Tests\Fixtures\RejectingMiddleware::class]);
+
+    $this->getJson('/geojson/protected?bbox=9.0,48.0,9.5,48.5')
+        ->assertUnauthorized();
 });
