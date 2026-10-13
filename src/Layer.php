@@ -4,6 +4,8 @@ namespace ItsJustVita\VectorTiles;
 
 use Closure;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
+use ItsJustVita\VectorTiles\Cache\TileCacheInvalidator;
 
 class Layer
 {
@@ -91,7 +93,16 @@ class Layer
 
     public function invalidateOn(string $modelClass): static
     {
+        if (in_array($modelClass, $this->invalidateOn, true)) {
+            return $this;
+        }
+
         $this->invalidateOn[] = $modelClass;
+
+        if (is_subclass_of($modelClass, Model::class)) {
+            $modelClass::observe(TileCacheInvalidator::class);
+        }
+
         return $this;
     }
 

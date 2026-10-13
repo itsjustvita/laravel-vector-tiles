@@ -72,6 +72,24 @@ it('flushes multiple layers for same model', function () {
     $invalidator->updated(new FakeModel());
 });
 
+it('flushes the layer cache when a model registered with invalidateOn changes', function () {
+    \Illuminate\Support\Facades\Schema::create('fake_models', function (\Illuminate\Database\Schema\Blueprint $table) {
+        $table->id();
+        $table->timestamps();
+    });
+
+    $layer = \ItsJustVita\VectorTiles\Facades\VectorTiles::layer('trassen')
+        ->from('trassen_table')
+        ->invalidateOn(FakeModel::class);
+
+    $cache = app(TileCache::class);
+    $cache->put($layer, 14, 8532, 5765, null, 'stale_tile');
+
+    (new FakeModel)->save();
+
+    expect($cache->get($layer, 14, 8532, 5765))->toBeNull();
+});
+
 class FakeModel extends \Illuminate\Database\Eloquent\Model
 {
     protected $table = 'fake_models';
