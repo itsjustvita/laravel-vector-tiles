@@ -101,3 +101,24 @@ it('accumulates multiple invalidateOn calls', function () {
 
     expect($layer->invalidateOn)->toBe([\stdClass::class, \ArrayObject::class]);
 });
+
+it('stores a simplify tolerance in pixels', function () {
+    expect((new Layer('roads'))->simplify(1.5)->simplify)->toBe(1.5)
+        ->and((new Layer('roads'))->simplify)->toBeNull();
+});
+
+it('rejects a simplify tolerance that is not positive', function (float $pixels) {
+    expect(fn () => (new Layer('roads'))->simplify($pixels))->toThrow(InvalidArgumentException::class);
+})->with([0.0, -1.0]);
+
+it('reads the simplify tolerance from config', function () {
+    expect(Layer::fromConfig('roads', ['simplify' => 1.5])->simplify)->toBe(1.5)
+        ->and(Layer::fromConfig('roads', [])->simplify)->toBeNull();
+});
+
+it('stores the zoom filter', function () {
+    $filter = fn ($query, int $z) => $query;
+
+    expect((new Layer('roads'))->filterByZoom($filter)->zoomFilter)->toBe($filter)
+        ->and((new Layer('roads'))->zoomFilter)->toBeNull();
+});

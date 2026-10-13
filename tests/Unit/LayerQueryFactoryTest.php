@@ -104,3 +104,28 @@ it('groups or-constraints of the scope so later filters cannot be bypassed', fun
     expect($query->toSql())->toBe('select * from "trassen_table" where ("owner_id" = ? or "public" = ?) and "tile_filter" = ?')
         ->and($query->getBindings())->toBe([1, 1, 1]);
 });
+
+it('applies the zoom filter after the scope and groups its or-constraints', function () {
+    $receivedZoom = null;
+    $layer = (new Layer('trassen'))
+        ->from('trassen_table')
+        ->scope(fn ($query) => $query->where('owner_id', 1))
+        ->filterByZoom(function ($query, int $z) use (&$receivedZoom) {
+            $receivedZoom = $z;
+            $query->where('major', true)->orWhere('min_zoom', '<=', $z);
+        });
+
+    $query = $this->factory->make($layer, null, 8);
+
+    expect($receivedZoom)->toBe(8)
+        ->and($query->toSql())->toBe('select * from "trassen_table" where "owner_id" = ? and ("major" = ? or "min_zoom" <= ?)')
+        ->and($query->getBindings())->toBe([1, true, 8]);
+});
+
+it('ignores the zoom filter without a zoom level', function () {
+    $layer = (new Layer('trassen'))
+        ->from('trassen_table')
+        ->filterByZoom(fn ($query) => $query->where('major', true));
+
+    expect($this->factory->make($layer)->toSql())->toBe('select * from "trassen_table"');
+});

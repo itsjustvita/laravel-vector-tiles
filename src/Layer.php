@@ -5,6 +5,7 @@ namespace ItsJustVita\VectorTiles;
 use Closure;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use InvalidArgumentException;
 use ItsJustVita\VectorTiles\Cache\TileCacheInvalidator;
 
 class Layer
@@ -21,6 +22,8 @@ class Layer
     public int $extent = 4096;
     public int $buffer = 256;
     public ?string $connection = null;
+    public ?float $simplify = null;
+    public ?Closure $zoomFilter = null;
 
     public function __construct(
         public readonly string $name,
@@ -39,6 +42,10 @@ class Layer
         $layer->extent = $config['extent'] ?? 4096;
         $layer->buffer = $config['buffer'] ?? 256;
         $layer->connection = $config['connection'] ?? null;
+
+        if (isset($config['simplify'])) {
+            $layer->simplify((float) $config['simplify']);
+        }
 
         return $layer;
     }
@@ -88,6 +95,31 @@ class Layer
     public function scope(Closure $scope): static
     {
         $this->scope = $scope;
+        return $this;
+    }
+
+    /**
+     * Simplify geometries below the layer's maxZoom. The tolerance is given in
+     * screen pixels of a 512 px tile, so it scales with the zoom level.
+     */
+    public function simplify(float $pixels): static
+    {
+        if ($pixels <= 0) {
+            throw new InvalidArgumentException("The simplify tolerance must be greater than 0, {$pixels} given.");
+        }
+
+        $this->simplify = $pixels;
+        return $this;
+    }
+
+    /**
+     * Constrain the tile query per zoom level. The callback receives the query
+     * builder and the zoom level. GeoJSON requests have no zoom level, so the
+     * filter does not apply there.
+     */
+    public function filterByZoom(Closure $callback): static
+    {
+        $this->zoomFilter = $callback;
         return $this;
     }
 

@@ -86,6 +86,7 @@ return [
     |     'properties' => ['id', 'typ', 'status'],
     |     'min_zoom' => 10,
     |     'max_zoom' => 18,
+    |     'simplify' => 1.5,
     |     'middleware' => [],
     | ],
     |

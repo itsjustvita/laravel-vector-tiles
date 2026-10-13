@@ -15,12 +15,13 @@ class LayerQueryFactory
     ) {}
 
     /**
-     * Build a fresh base query for the layer with its scope applied.
+     * Build a fresh base query for the layer with its scope applied, and with
+     * its zoom filter when a zoom level is given.
      *
      * Eloquent sources run on the model's connection, table sources on the
      * layer's connection. The layer's source is never mutated.
      */
-    public function make(Layer $layer, ?Authenticatable $user = null): QueryBuilder
+    public function make(Layer $layer, ?Authenticatable $user = null, ?int $zoom = null): QueryBuilder
     {
         if ($layer->source instanceof EloquentBuilder) {
             $query = clone $layer->source->toBase();
@@ -33,6 +34,12 @@ class LayerQueryFactory
             $sourceWheres = count($query->wheres);
             ($layer->scope)($query, $user);
             $this->groupOrWheres($query, $sourceWheres);
+        }
+
+        if ($zoom !== null && $layer->zoomFilter !== null) {
+            $scopeWheres = count($query->wheres);
+            ($layer->zoomFilter)($query, $zoom);
+            $this->groupOrWheres($query, $scopeWheres);
         }
 
         return $query;

@@ -156,3 +156,18 @@ it('resolves middleware aliases for layer middleware', function () {
 
     $this->getJson('/geojson/private?bbox=9.0,48.0,9.5,48.5')->assertUnauthorized();
 });
+
+it('applies neither the zoom filter nor simplification', function () {
+    VectorTiles::layer('roads')
+        ->from('roads_table')
+        ->simplify(1.5)
+        ->filterByZoom(fn ($query, int $z) => $query->where('major', true));
+
+    $queries = \Illuminate\Support\Facades\DB::pretend(function () {
+        $this->getJson('/geojson/roads?bbox=9.0,48.0,9.5,48.5')->assertOk();
+    });
+
+    expect($queries[0]['query'])
+        ->not->toContain('"major"')
+        ->not->toContain('ST_Simplify');
+});
