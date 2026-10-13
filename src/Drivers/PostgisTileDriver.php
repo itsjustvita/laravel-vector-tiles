@@ -3,29 +3,21 @@
 namespace ItsJustVita\VectorTiles\Drivers;
 
 use Illuminate\Contracts\Auth\Authenticatable;
-use Illuminate\Database\DatabaseManager;
-use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
-use Illuminate\Database\Query\Builder as QueryBuilder;
 use ItsJustVita\VectorTiles\Layer;
+use ItsJustVita\VectorTiles\Query\LayerQueryFactory;
 
 class PostgisTileDriver implements TileDriverInterface
 {
     public function __construct(
-        protected DatabaseManager $db,
+        protected LayerQueryFactory $queries,
     ) {}
 
     public function getTile(Layer $layer, int $z, int $x, int $y, ?Authenticatable $user = null): ?string
     {
-        $connection = $this->db->connection($layer->connection);
-        $grammar = $connection->getQueryGrammar();
+        $query = $this->queries->make($layer, $user);
+        $connection = $query->getConnection();
 
-        $query = $this->buildBaseQuery($layer, $connection);
-
-        if ($layer->scope !== null) {
-            ($layer->scope)($query, $user);
-        }
-
-        $wrappedGeom = $grammar->wrap($layer->geometry);
+        $wrappedGeom = $query->getGrammar()->wrap($layer->geometry);
 
         $query->select([]);
         $query->selectRaw(
@@ -51,18 +43,5 @@ class PostgisTileDriver implements TileDriverInterface
         $result = $connection->selectOne($sql, $bindings);
 
         return $result?->tile;
-    }
-
-    protected function buildBaseQuery(Layer $layer, $connection): QueryBuilder
-    {
-        if ($layer->source instanceof EloquentBuilder) {
-            return clone $layer->source->toBase();
-        }
-
-        if (is_string($layer->source)) {
-            return $connection->table($layer->source);
-        }
-
-        return $connection->table($layer->name);
     }
 }

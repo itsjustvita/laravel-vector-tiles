@@ -6,7 +6,7 @@ use ItsJustVita\VectorTiles\Drivers\PostgisTileDriver;
 use ItsJustVita\VectorTiles\Layer;
 
 beforeEach(function () {
-    $this->driver = new PostgisTileDriver($this->app['db']);
+    $this->driver = app(PostgisTileDriver::class);
 });
 
 function captureTileQueries(callable $fn): array
@@ -177,4 +177,39 @@ it('passes user to scope closure for auth-aware filtering', function () {
 
     expect($capturedUser)->toBe($user);
     expect($queries[0]['query'])->toContain('"owner_id" = 1337');
+});
+
+it('runs eloquent sources on the model connection', function () {
+    config()->set('database.connections.secondary', config('database.connections.'.config('database.default')));
+
+    $model = new class extends Model
+    {
+        protected $connection = 'secondary';
+
+        protected $table = 'trassen_table';
+    };
+
+    $layer = (new Layer('trassen'))->from($model->newQuery());
+
+    $onSecondary = [];
+    $onDefault = DB::pretend(function () use ($layer, &$onSecondary) {
+        $onSecondary = DB::connection('secondary')->pretend(
+            fn () => $this->driver->getTile($layer, 14, 8532, 5765),
+        );
+    });
+
+    expect($onSecondary)->toHaveCount(1)
+        ->and($onDefault)->toBeEmpty();
+});
+
+it('builds identical queries for repeated requests', function () {
+    $layer = (new Layer('trassen'))
+        ->from(trassenModel()->newQuery()->where('status', 'aktiv'))
+        ->properties(['id'])
+        ->scope(fn ($query) => $query->where('owner_id', 1));
+
+    $first = captureTileQueries(fn () => $this->driver->getTile($layer, 14, 8532, 5765));
+    $second = captureTileQueries(fn () => $this->driver->getTile($layer, 14, 8532, 5765));
+
+    expect(array_column($second, 'query'))->toBe(array_column($first, 'query'));
 });

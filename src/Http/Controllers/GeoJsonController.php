@@ -2,14 +2,12 @@
 
 namespace ItsJustVita\VectorTiles\Http\Controllers;
 
-use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
-use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pipeline\Pipeline;
 use Illuminate\Routing\Controller;
-use Illuminate\Support\Facades\DB;
 use ItsJustVita\VectorTiles\Layer;
+use ItsJustVita\VectorTiles\Query\LayerQueryFactory;
 use ItsJustVita\VectorTiles\VectorTileManager;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -18,6 +16,7 @@ class GeoJsonController extends Controller
     public function __invoke(
         Request $request,
         VectorTileManager $manager,
+        LayerQueryFactory $queries,
         string $layer,
     ): Response {
         $layerConfig = $manager->getLayer($layer);
@@ -30,13 +29,13 @@ class GeoJsonController extends Controller
             return app(Pipeline::class)
                 ->send($request)
                 ->through($layerConfig->middleware)
-                ->then(fn (Request $req) => $this->handle($req, $layerConfig));
+                ->then(fn (Request $req) => $this->handle($req, $layerConfig, $queries));
         }
 
-        return $this->handle($request, $layerConfig);
+        return $this->handle($request, $layerConfig, $queries);
     }
 
-    protected function handle(Request $request, Layer $layerConfig): JsonResponse
+    protected function handle(Request $request, Layer $layerConfig, LayerQueryFactory $queries): JsonResponse
     {
         $request->validate([
             'bbox' => ['required', 'string', function (string $attribute, mixed $value, \Closure $fail) {
@@ -66,14 +65,9 @@ class GeoJsonController extends Controller
         $maxLimit = (int) config('vector-tiles.geojson.max_limit', 5000);
         $limit = min((int) $request->input('limit', $defaultLimit), $maxLimit);
 
-        $connection = DB::connection($layerConfig->connection);
-        $grammar = $connection->getQueryGrammar();
-
-        $query = $this->buildBaseQuery($layerConfig, $connection);
-
-        if ($layerConfig->scope !== null) {
-            ($layerConfig->scope)($query, $request->user());
-        }
+        $query = $queries->make($layerConfig, $request->user());
+        $connection = $query->getConnection();
+        $grammar = $query->getGrammar();
 
         $wrappedGeom = $grammar->wrap($layerConfig->geometry);
         $srid = (int) $layerConfig->srid;
@@ -106,19 +100,6 @@ class GeoJsonController extends Controller
             'type' => 'FeatureCollection',
             'features' => $features,
         ], 200, ['Content-Type' => 'application/geo+json']);
-    }
-
-    protected function buildBaseQuery(Layer $layer, $connection): QueryBuilder
-    {
-        if ($layer->source instanceof EloquentBuilder) {
-            return clone $layer->source->toBase();
-        }
-
-        if (is_string($layer->source)) {
-            return $connection->table($layer->source);
-        }
-
-        return $connection->table($layer->name);
     }
 
     /**
