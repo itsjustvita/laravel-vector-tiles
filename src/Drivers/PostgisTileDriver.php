@@ -4,6 +4,7 @@ namespace ItsJustVita\VectorTiles\Drivers;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use ItsJustVita\VectorTiles\Layer;
+use ItsJustVita\VectorTiles\Query\CompiledQuery;
 use ItsJustVita\VectorTiles\Query\LayerQueryFactory;
 use ItsJustVita\VectorTiles\Support\WebMercator;
 
@@ -18,15 +19,38 @@ class PostgisTileDriver implements TileDriverInterface
      */
     public function getTile(Layer $layer, int $z, int $x, int $y, ?Authenticatable $user = null): ?string
     {
-        $query = $this->queries->make($layer, $user);
+        $query = $this->tileQuery($layer, $z, $x, $y, $user);
+
+        $tile = $query->connection->selectOne($query->sql, $query->bindings)?->tile;
+
+        return is_resource($tile) ? (string) stream_get_contents($tile) : (string) $tile;
+    }
+
+    /**
+     * The complete SQL statement that renders the tile, so tools can inspect
+     * exactly what a tile request runs.
+     */
+    public function tileQuery(Layer $layer, int $z, int $x, int $y, ?Authenticatable $user = null): CompiledQuery
+    {
+        $query = $this->queries->make($layer, $user, $z);
 
         $geometry = $query->getGrammar()->wrap($layer->geometry);
         $srid = (int) $layer->srid;
 
+        $mercator = $this->toMercator($geometry, $srid);
+        $bindings = [$z, $x, $y, $layer->extent, $layer->buffer];
+
+        $tolerance = $this->simplifyTolerance($layer, $z);
+
+        if ($tolerance !== null) {
+            $mercator = "ST_Simplify({$mercator}, ?::float8, false)";
+            array_unshift($bindings, $tolerance);
+        }
+
         $query->select([]);
         $query->selectRaw(
-            "ST_AsMVTGeom({$this->toMercator($geometry, $srid)}, ST_TileEnvelope(?, ?, ?), ?::int4, ?::int4, true) AS __vt_geom",
-            [$z, $x, $y, $layer->extent, $layer->buffer],
+            "ST_AsMVTGeom({$mercator}, ST_TileEnvelope(?, ?, ?), ?::int4, ?::int4, true) AS __vt_geom",
+            $bindings,
         );
 
         if (! empty($layer->properties)) {
@@ -38,14 +62,25 @@ class PostgisTileDriver implements TileDriverInterface
             WebMercator::tileBounds($z, $x, $y, $layer->buffer / $layer->extent),
         );
 
-        $result = $query->getConnection()->selectOne(
+        return new CompiledQuery(
+            $query->getConnection(),
             "SELECT ST_AsMVT(__vt_tile, ?::text, ?::int4, '__vt_geom') AS tile FROM ({$query->toSql()}) AS __vt_tile",
             array_merge([$layer->name, $layer->extent], $query->getBindings()),
         );
+    }
 
-        $tile = $result?->tile;
+    /**
+     * Simplification tolerance in EPSG:3857 meters, or null when the layer is
+     * not simplified at zoom $z. Tiles at the layer's maxZoom keep full detail,
+     * because map clients overzoom them.
+     */
+    protected function simplifyTolerance(Layer $layer, int $z): ?float
+    {
+        if ($layer->simplify === null || $z >= $layer->maxZoom) {
+            return null;
+        }
 
-        return is_resource($tile) ? (string) stream_get_contents($tile) : (string) $tile;
+        return $layer->simplify * WebMercator::tileWidth($z) / 512;
     }
 
     /**
