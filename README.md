@@ -60,6 +60,8 @@ Tiles are served at `GET /tiles/{layer}/{z}/{x}/{y}.mvt`.
 Combine middleware for access control with scopes for per-user data filtering:
 
 ```php
+use Illuminate\Database\Query\Builder;
+
 VectorTiles::layer('buildings')
     ->from(Building::query())
     ->middleware(['auth:sanctum'])
@@ -67,6 +69,8 @@ VectorTiles::layer('buildings')
         $user?->isAdmin() ? $query : $query->where('owner_id', $user?->id)
     );
 ```
+
+Layer middleware accepts the same aliases and parameters as route middleware, for example `auth:sanctum` or `can:view-map`. The scope receives the underlying `Illuminate\Database\Query\Builder`. OR conditions in the source query and in the scope are grouped automatically, so a scope can never be bypassed.
 
 ### Cache Invalidation
 
@@ -98,6 +102,8 @@ CREATE INDEX buildings_geom_4326_idx ON buildings USING gist (ST_Transform(geom,
 Tiles are sent with `Cache-Control: public, max-age={cache.ttl}`. As soon as a layer has middleware or a scope, or global middleware is configured, tiles are sent as `private`, so shared caches and CDNs never serve one user's tiles to another.
 
 Empty tiles return `204 No Content` and are cached as well.
+
+Cached tiles are stored per layer, tile and authenticated user, so a user never receives a tile rendered for someone else. If a scope depends on something other than the user, such as the current team, flush the layer when that context changes.
 
 The package does not compress tiles itself. Enable compression for `application/vnd.mapbox-vector-tile` in your web server, for example `encode gzip zstd` in Caddy or `gzip_types application/vnd.mapbox-vector-tile;` in nginx.
 
