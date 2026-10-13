@@ -115,3 +115,86 @@ it('omits CORS header when cors.allowed_origins is null', function () {
 
     expect($response->headers->has('Access-Control-Allow-Origin'))->toBeFalse();
 });
+
+it('returns 204 with cache and cors headers for an empty tile', function () {
+    config()->set('vector-tiles.cors.allowed_origins', 'https://maps.example.com');
+
+    $driver = Mockery::mock(\ItsJustVita\VectorTiles\Drivers\TileDriverInterface::class);
+    $driver->shouldReceive('getTile')->andReturn('');
+    app()->instance(\ItsJustVita\VectorTiles\Drivers\TileDriverInterface::class, $driver);
+
+    $this->get('/tiles/trassen/14/8532/5765.mvt')
+        ->assertNoContent()
+        ->assertHeader('Cache-Control', 'max-age=3600, public')
+        ->assertHeader('Access-Control-Allow-Origin', 'https://maps.example.com');
+});
+
+it('caches empty tiles', function () {
+    $driver = Mockery::mock(\ItsJustVita\VectorTiles\Drivers\TileDriverInterface::class);
+    $driver->shouldReceive('getTile')->once()->andReturn('');
+    app()->instance(\ItsJustVita\VectorTiles\Drivers\TileDriverInterface::class, $driver);
+
+    $this->get('/tiles/trassen/14/8532/5765.mvt')->assertNoContent();
+    $this->get('/tiles/trassen/14/8532/5765.mvt')->assertNoContent();
+});
+
+it('does not set a content encoding so web servers can compress tiles', function () {
+    $driver = Mockery::mock(\ItsJustVita\VectorTiles\Drivers\TileDriverInterface::class);
+    $driver->shouldReceive('getTile')->andReturn('fake_tile');
+    app()->instance(\ItsJustVita\VectorTiles\Drivers\TileDriverInterface::class, $driver);
+
+    $response = $this->get('/tiles/trassen/14/8532/5765.mvt')->assertOk();
+
+    expect($response->headers->has('Content-Encoding'))->toBeFalse();
+});
+
+it('marks tiles private when the layer has middleware', function () {
+    VectorTiles::layer('protected')
+        ->from('trassen_table')
+        ->middleware([\ItsJustVita\VectorTiles\Tests\Fixtures\PassThroughMiddleware::class]);
+
+    $driver = Mockery::mock(\ItsJustVita\VectorTiles\Drivers\TileDriverInterface::class);
+    $driver->shouldReceive('getTile')->andReturn('fake_tile');
+    app()->instance(\ItsJustVita\VectorTiles\Drivers\TileDriverInterface::class, $driver);
+
+    $this->get('/tiles/protected/14/8532/5765.mvt')
+        ->assertOk()
+        ->assertHeader('Cache-Control', 'max-age=3600, private');
+});
+
+it('marks tiles private when the layer has a scope', function () {
+    VectorTiles::layer('scoped')
+        ->from('trassen_table')
+        ->scope(fn ($query, $user) => $query);
+
+    $driver = Mockery::mock(\ItsJustVita\VectorTiles\Drivers\TileDriverInterface::class);
+    $driver->shouldReceive('getTile')->andReturn('fake_tile');
+    app()->instance(\ItsJustVita\VectorTiles\Drivers\TileDriverInterface::class, $driver);
+
+    $this->get('/tiles/scoped/14/8532/5765.mvt')
+        ->assertOk()
+        ->assertHeader('Cache-Control', 'max-age=3600, private');
+});
+
+it('marks tiles private when global middleware is configured', function () {
+    config()->set('vector-tiles.middleware', [\ItsJustVita\VectorTiles\Tests\Fixtures\PassThroughMiddleware::class]);
+
+    $driver = Mockery::mock(\ItsJustVita\VectorTiles\Drivers\TileDriverInterface::class);
+    $driver->shouldReceive('getTile')->andReturn('fake_tile');
+    app()->instance(\ItsJustVita\VectorTiles\Drivers\TileDriverInterface::class, $driver);
+
+    $this->get('/tiles/trassen/14/8532/5765.mvt')
+        ->assertOk()
+        ->assertHeader('Cache-Control', 'max-age=3600, private');
+});
+
+it('still serves tiles and empty tiles when caching is disabled', function () {
+    config()->set('vector-tiles.cache.enabled', false);
+
+    $driver = Mockery::mock(\ItsJustVita\VectorTiles\Drivers\TileDriverInterface::class);
+    $driver->shouldReceive('getTile')->twice()->andReturn('fake_tile', '');
+    app()->instance(\ItsJustVita\VectorTiles\Drivers\TileDriverInterface::class, $driver);
+
+    $this->get('/tiles/trassen/14/8532/5765.mvt')->assertOk();
+    $this->get('/tiles/trassen/14/8532/5765.mvt')->assertNoContent();
+});

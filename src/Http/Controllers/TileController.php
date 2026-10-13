@@ -7,6 +7,7 @@ use Illuminate\Http\Response;
 use Illuminate\Routing\Controller;
 use ItsJustVita\VectorTiles\Cache\TileCache;
 use ItsJustVita\VectorTiles\Drivers\TileDriverInterface;
+use ItsJustVita\VectorTiles\Layer;
 use ItsJustVita\VectorTiles\VectorTileManager;
 
 class TileController extends Controller
@@ -24,30 +25,24 @@ class TileController extends Controller
         $layerConfig = $manager->getLayer($layer);
         $user = $request->user();
 
-        $cached = $cache->get($layerConfig, $z, $x, $y, $user);
-        if ($cached !== null) {
-            return $this->tileResponse($cached);
-        }
-
-        $tile = $driver->getTile($layerConfig, $z, $x, $y, $user);
+        $tile = $cache->get($layerConfig, $z, $x, $y, $user);
 
         if ($tile === null) {
-            return new Response('', 204);
+            $tile = (string) $driver->getTile($layerConfig, $z, $x, $y, $user);
+            $cache->put($layerConfig, $z, $x, $y, $user, $tile);
         }
 
-        $cache->put($layerConfig, $z, $x, $y, $user, $tile);
-
-        return $this->tileResponse($tile);
+        return $this->tileResponse($layerConfig, $tile);
     }
 
-    protected function tileResponse(string $tile): Response
+    protected function tileResponse(Layer $layer, string $tile): Response
     {
         $ttl = (int) config('vector-tiles.cache.ttl', 3600);
+        $visibility = $this->isPrivate($layer) ? 'private' : 'public';
 
         $headers = [
             'Content-Type' => 'application/vnd.mapbox-vector-tile',
-            'Content-Encoding' => 'identity',
-            'Cache-Control' => "public, max-age={$ttl}",
+            'Cache-Control' => "{$visibility}, max-age={$ttl}",
         ];
 
         $corsOrigin = config('vector-tiles.cors.allowed_origins');
@@ -55,6 +50,20 @@ class TileController extends Controller
             $headers['Access-Control-Allow-Origin'] = $corsOrigin;
         }
 
+        if ($tile === '') {
+            return new Response('', 204, $headers);
+        }
+
         return new Response($tile, 200, $headers);
+    }
+
+    /**
+     * Tiles that may depend on who asks must never be stored by shared caches.
+     */
+    protected function isPrivate(Layer $layer): bool
+    {
+        return ! empty($layer->middleware)
+            || $layer->scope !== null
+            || ! empty(config('vector-tiles.middleware', []));
     }
 }
