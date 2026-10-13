@@ -9,6 +9,15 @@ use ItsJustVita\VectorTiles\Layer;
 
 class TileCache
 {
+    /**
+     * Lifetime of the version counters. A counter that expires restarts at 0,
+     * which is safe as long as cached tiles expire sooner (cache.ttl).
+     */
+    protected const int COUNTER_TTL = 31536000;
+
+    /**
+     * Returns null on a cache miss and an empty string for a cached empty tile.
+     */
     public function get(Layer $layer, int $z, int $x, int $y, ?Authenticatable $user = null): ?string
     {
         if (! $this->isEnabled()) {
@@ -24,69 +33,49 @@ class TileCache
             return;
         }
 
-        $key = $this->buildKey($layer, $z, $x, $y, $user);
-        $ttl = config('vector-tiles.cache.ttl', 3600);
+        $ttl = (int) config('vector-tiles.cache.ttl', 3600);
 
-        $this->store()->put($key, $tile, $ttl);
-        $this->trackKey($layer->name, $key);
+        $this->store()->put($this->buildKey($layer, $z, $x, $y, $user), $tile, $ttl);
     }
 
     public function flushLayer(string $layerName): void
     {
-        $store = $this->store();
-        $registryKey = "vtiles:keys:{$layerName}";
-        $keys = $store->get($registryKey, []);
-
-        foreach ($keys as $key) {
-            $store->forget($key);
-        }
-
-        $store->forget($registryKey);
+        $this->bump("vtiles:version:{$layerName}");
     }
 
     public function flushAll(): void
     {
-        $store = $this->store();
-        $layersKey = 'vtiles:layers';
-        $layerNames = $store->get($layersKey, []);
-
-        foreach ($layerNames as $layerName) {
-            $this->flushLayer($layerName);
-        }
-
-        $store->forget($layersKey);
+        $this->bump('vtiles:epoch');
     }
 
     public function buildKey(Layer $layer, int $z, int $x, int $y, ?Authenticatable $user = null): string
     {
-        $key = "vtiles:{$layer->name}:{$z}:{$x}:{$y}";
+        $versionKey = "vtiles:version:{$layer->name}";
+        $counters = $this->store()->many(['vtiles:epoch', $versionKey]);
+
+        $epoch = (int) ($counters['vtiles:epoch'] ?? 0);
+        $version = (int) ($counters[$versionKey] ?? 0);
+
+        $key = "vtiles:e{$epoch}:{$layer->name}:v{$version}:{$z}:{$x}:{$y}";
 
         if ($layer->scope !== null && $user !== null) {
-            $key .= ':' . md5((string) $user->getAuthIdentifier());
+            $key .= ':u'.md5((string) $user->getAuthIdentifier());
         }
 
         return $key;
     }
 
-    protected function trackKey(string $layerName, string $key): void
+    /**
+     * Atomically increments a counter. The add() with a TTL is atomic in every
+     * store and initializes the counter, because some stores (e.g. database)
+     * cannot increment a missing key.
+     */
+    protected function bump(string $key): void
     {
         $store = $this->store();
 
-        // Track key for this layer
-        $registryKey = "vtiles:keys:{$layerName}";
-        $keys = $store->get($registryKey, []);
-        if (! in_array($key, $keys)) {
-            $keys[] = $key;
-            $store->put($registryKey, $keys, 86400 * 7);
-        }
-
-        // Track layer name globally
-        $layersKey = 'vtiles:layers';
-        $layerNames = $store->get($layersKey, []);
-        if (! in_array($layerName, $layerNames)) {
-            $layerNames[] = $layerName;
-            $store->put($layersKey, $layerNames, 86400 * 7);
-        }
+        $store->add($key, 0, self::COUNTER_TTL);
+        $store->increment($key);
     }
 
     protected function isEnabled(): bool
@@ -96,8 +85,6 @@ class TileCache
 
     protected function store(): Repository
     {
-        $storeName = config('vector-tiles.cache.store');
-
-        return Cache::store($storeName);
+        return Cache::store(config('vector-tiles.cache.store'));
     }
 }
