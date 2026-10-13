@@ -77,3 +77,30 @@ it('applies global scopes such as soft deletes from eloquent sources', function 
 
     expect($query->toSql())->toContain('"trassen_table"."deleted_at" is null');
 });
+
+it('groups or-constraints of the source so the scope cannot be bypassed', function () {
+    $model = new class extends Model
+    {
+        protected $table = 'trassen_table';
+    };
+    $layer = (new Layer('trassen'))
+        ->from($model->newQuery()->where('status', 'aktiv')->orWhere('status', 'geplant'))
+        ->scope(fn ($query) => $query->where('owner_id', 1));
+
+    $query = $this->factory->make($layer);
+
+    expect($query->toSql())->toBe('select * from "trassen_table" where ("status" = ? or "status" = ?) and "owner_id" = ?')
+        ->and($query->getBindings())->toBe(['aktiv', 'geplant', 1]);
+});
+
+it('groups or-constraints of the scope so later filters cannot be bypassed', function () {
+    $layer = (new Layer('trassen'))
+        ->from('trassen_table')
+        ->scope(fn ($query) => $query->where('owner_id', 1)->orWhere('public', 1));
+
+    $query = $this->factory->make($layer);
+    $query->where('tile_filter', 1);
+
+    expect($query->toSql())->toBe('select * from "trassen_table" where ("owner_id" = ? or "public" = ?) and "tile_filter" = ?')
+        ->and($query->getBindings())->toBe([1, 1, 1]);
+});

@@ -37,8 +37,10 @@ it('builds an index-friendly tile query for a 4326 table layer', function () {
     expect($queries)->toHaveCount(1);
 
     expect($queries[0]['query'])
-        ->toContain("ST_AsMVT(tile, 'trassen'::text, 4096::int4, '__vt_geom')")
-        ->toContain('ST_AsMVTGeom(ST_Transform("geom", 3857), ST_TileEnvelope(14, 8532, 5765), 4096::int4, 256::int4, true) AS __vt_geom')
+        ->toContain("ST_AsMVT(__vt_tile, 'trassen'::text, 4096::int4, '__vt_geom')")
+        ->toContain(') AS __vt_tile')
+        ->toContain('ST_ClipByBox2D("geom", ST_MakeEnvelope(-180, -85.0511')
+        ->toContain('END, 3857), ST_TileEnvelope(14, 8532, 5765), 4096::int4, 256::int4, true) AS __vt_geom')
         ->toMatch('/"geom" && ST_Transform\(ST_MakeEnvelope\([-\d., E+]+, 3857\), 4326\)/')
         ->toContain('"trassen_table"')
         ->toContain('"id"')
@@ -83,7 +85,7 @@ it('passes a custom extent to both mvt functions', function () {
     $queries = captureTileQueries(fn () => $this->driver->getTile($layer, 14, 8532, 5765));
 
     expect($queries[0]['query'])
-        ->toContain("ST_AsMVT(tile, 'trassen'::text, 8192::int4, '__vt_geom')")
+        ->toContain("ST_AsMVT(__vt_tile, 'trassen'::text, 8192::int4, '__vt_geom')")
         ->toContain('8192::int4, 512::int4, true');
 });
 

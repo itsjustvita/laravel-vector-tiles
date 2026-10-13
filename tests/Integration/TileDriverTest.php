@@ -135,3 +135,43 @@ it('supports schema-qualified table sources', function () {
 
     expect(MvtDecoder::decode($tile)['qualified']['features'])->toHaveCount(1);
 });
+
+it('never lets or-constraints of the source bypass the scope', function () {
+    [$z, $x, $y] = $this->sampleTile();
+    $this->createPoints('vt_points', [
+        $this->lonLatInTile($z, $x, $y, 0.25, 0.25),
+        $this->lonLatInTile($z, $x, $y, 0.75, 0.75),
+    ]);
+
+    $model = new class extends Model
+    {
+        protected $table = 'vt_points';
+    };
+    $layer = (new Layer('points'))
+        ->from($model->newQuery()->where('name', 'p0')->orWhere('name', 'p1'))
+        ->scope(fn ($query) => $query->where('id', 2));
+
+    $tile = $this->driver->getTile($layer, $z, $x, $y);
+
+    expect(MvtDecoder::decode($tile)['points']['features'])->toHaveCount(1);
+});
+
+it('renders 4326 layers whose geometries reach the poles', function () {
+    DB::statement('CREATE TABLE vt_polar (id serial PRIMARY KEY, geom geometry(Polygon, 4326))');
+    DB::statement('INSERT INTO vt_polar (geom) VALUES (ST_MakeEnvelope(-180, -90, 180, -60, 4326))');
+    $layer = (new Layer('polar'))->from('vt_polar');
+
+    expect(MvtDecoder::decode($this->driver->getTile($layer, 0, 0, 0))['polar']['features'])->toHaveCount(1)
+        ->and(MvtDecoder::decode($this->driver->getTile($layer, 1, 0, 1))['polar']['features'])->toHaveCount(1);
+});
+
+it('renders layers with a property named like the internal subquery alias', function () {
+    [$z, $x, $y] = $this->sampleTile();
+    $this->createPoints('vt_points', [$this->lonLatInTile($z, $x, $y)]);
+    DB::statement('ALTER TABLE vt_points ADD COLUMN tile text');
+    DB::statement("UPDATE vt_points SET tile = 'a'");
+
+    $tile = $this->driver->getTile((new Layer('points'))->from('vt_points')->properties(['id', 'tile']), $z, $x, $y);
+
+    expect(MvtDecoder::decode($tile)['points']['keys'])->toEqualCanonicalizing(['id', 'tile']);
+});

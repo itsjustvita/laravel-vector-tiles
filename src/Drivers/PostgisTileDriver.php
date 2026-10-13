@@ -22,11 +22,10 @@ class PostgisTileDriver implements TileDriverInterface
 
         $geometry = $query->getGrammar()->wrap($layer->geometry);
         $srid = (int) $layer->srid;
-        $mercator = $srid === 3857 ? $geometry : "ST_Transform({$geometry}, 3857)";
 
         $query->select([]);
         $query->selectRaw(
-            "ST_AsMVTGeom({$mercator}, ST_TileEnvelope(?, ?, ?), ?::int4, ?::int4, true) AS __vt_geom",
+            "ST_AsMVTGeom({$this->toMercator($geometry, $srid)}, ST_TileEnvelope(?, ?, ?), ?::int4, ?::int4, true) AS __vt_geom",
             [$z, $x, $y, $layer->extent, $layer->buffer],
         );
 
@@ -40,13 +39,31 @@ class PostgisTileDriver implements TileDriverInterface
         );
 
         $result = $query->getConnection()->selectOne(
-            "SELECT ST_AsMVT(tile, ?::text, ?::int4, '__vt_geom') AS tile FROM ({$query->toSql()}) AS tile",
+            "SELECT ST_AsMVT(__vt_tile, ?::text, ?::int4, '__vt_geom') AS tile FROM ({$query->toSql()}) AS __vt_tile",
             array_merge([$layer->name, $layer->extent], $query->getBindings()),
         );
 
         $tile = $result?->tile;
 
         return is_resource($tile) ? (string) stream_get_contents($tile) : (string) $tile;
+    }
+
+    /**
+     * Geometry expression in EPSG:3857. WGS84 geometries reaching beyond the
+     * Web Mercator latitude limit are clipped first, because transforming a
+     * pole to EPSG:3857 fails.
+     */
+    protected function toMercator(string $geometry, int $srid): string
+    {
+        $lat = WebMercator::MAX_LATITUDE;
+
+        return match ($srid) {
+            3857 => $geometry,
+            4326 => "ST_Transform(CASE WHEN ST_YMin({$geometry}) < -{$lat} OR ST_YMax({$geometry}) > {$lat}"
+                ." THEN ST_ClipByBox2D({$geometry}, ST_MakeEnvelope(-180, -{$lat}, 180, {$lat}, 4326))"
+                ." ELSE {$geometry} END, 3857)",
+            default => "ST_Transform({$geometry}, 3857)",
+        };
     }
 
     /**
