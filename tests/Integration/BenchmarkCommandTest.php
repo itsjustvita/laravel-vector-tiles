@@ -29,7 +29,8 @@ beforeEach(function () {
 });
 
 afterEach(function () {
-    if (is_file($this->tileList)) {
+    // Skipped tests never run beforeEach, so there is no tile list to remove.
+    if (isset($this->tileList) && is_file($this->tileList)) {
         unlink($this->tileList);
     }
 });
