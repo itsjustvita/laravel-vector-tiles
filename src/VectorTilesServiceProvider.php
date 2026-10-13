@@ -32,6 +32,7 @@ class VectorTilesServiceProvider extends ServiceProvider
 
             $this->commands([
                 Commands\InstallCommand::class,
+                Commands\DoctorCommand::class,
             ]);
         }
 

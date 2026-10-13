@@ -82,12 +82,15 @@ abstract class IntegrationTestCase extends TestCase
     /**
      * @param  list<array{0: float, 1: float}>  $lonLats  WGS84 coordinates, stored as points named p0, p1, …
      */
-    protected function createPoints(string $table, array $lonLats, int $srid = 4326, string $connection = 'pgsql'): void
+    protected function createPoints(string $table, array $lonLats, int $srid = 4326, string $connection = 'pgsql', bool $index = true): void
     {
         $db = DB::connection($connection);
 
         $db->statement("CREATE TABLE {$table} (id serial PRIMARY KEY, name text, geom geometry(Point, {$srid}))");
-        $db->statement("CREATE INDEX ON {$table} USING gist (geom)");
+
+        if ($index) {
+            $db->statement("CREATE INDEX ON {$table} USING gist (geom)");
+        }
 
         foreach (array_values($lonLats) as $i => [$lon, $lat]) {
             $db->insert(
@@ -97,6 +100,17 @@ abstract class IntegrationTestCase extends TestCase
         }
 
         $db->statement("ANALYZE {$table}");
+    }
+
+    /**
+     * Creates vt_users with user 7 named p0 and makes it the default auth provider.
+     */
+    protected function createUsers(): void
+    {
+        DB::statement('CREATE TABLE vt_users (id integer PRIMARY KEY, name text)');
+        DB::insert("INSERT INTO vt_users (id, name) VALUES (7, 'p0')");
+
+        config()->set('auth.providers.users', ['driver' => 'database', 'table' => 'vt_users']);
     }
 
     /**
