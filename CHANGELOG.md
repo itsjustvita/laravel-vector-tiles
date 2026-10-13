@@ -4,6 +4,23 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `simplify()` on layers: geometry simplification with a tolerance in screen pixels below the layer's `maxZoom`.
+- `filterByZoom()` on layers: constrain tile queries per zoom level.
+- `vector-tiles:doctor` checks PostGIS, source, geometry column, SRID, properties and spatial index usage of each layer, read-only.
+- `vector-tiles:benchmark` measures render time and tile size per zoom level on tiles where the layer has data.
+- `TileCache::remember()` and `PostgisTileDriver::tileQuery()`.
+
+### Fixed
+
+- The GeoJSON endpoint failed for EPSG:3857 layers when the bbox reached ±90° latitude on its far side, e.g. `0,90,10,90`.
+- A cache flush while a tile was rendering could store the outdated tile under the new version until the TTL expired.
+- A `bbox` query parameter given as an array returned 500 instead of 422.
+- The TileJSON endpoint ignored the layer's middleware and exposed the metadata of protected layers.
+
 ## [0.2.0] - 2026-10-13
 
 This release makes the package work against a real PostGIS database and verifies it with integration tests in CI.
