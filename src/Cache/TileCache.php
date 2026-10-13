@@ -58,7 +58,8 @@ class TileCache
 
         $key = "vtiles:e{$epoch}:{$layer->name}:v{$version}:{$z}:{$x}:{$y}";
 
-        if ($layer->scope !== null && $user !== null) {
+        // Tiles may depend on the user through scopes, global scopes or policies.
+        if ($user !== null) {
             $key .= ':u'.md5((string) $user->getAuthIdentifier());
         }
 

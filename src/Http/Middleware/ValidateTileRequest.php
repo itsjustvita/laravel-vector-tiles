@@ -5,6 +5,7 @@ namespace ItsJustVita\VectorTiles\Http\Middleware;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Pipeline\Pipeline;
+use Illuminate\Routing\Router;
 use ItsJustVita\VectorTiles\VectorTileManager;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -41,7 +42,7 @@ class ValidateTileRequest
         if (! empty($layer->middleware)) {
             return app(Pipeline::class)
                 ->send($request)
-                ->through($layer->middleware)
+                ->through(app(Router::class)->resolveMiddleware($layer->middleware))
                 ->then(fn ($req) => $next($req));
         }
 

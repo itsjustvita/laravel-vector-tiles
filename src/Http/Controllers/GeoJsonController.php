@@ -6,6 +6,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pipeline\Pipeline;
 use Illuminate\Routing\Controller;
+use Illuminate\Routing\Router;
 use ItsJustVita\VectorTiles\Layer;
 use ItsJustVita\VectorTiles\Query\LayerQueryFactory;
 use ItsJustVita\VectorTiles\Support\WebMercator;
@@ -29,7 +30,7 @@ class GeoJsonController extends Controller
         if (! empty($layerConfig->middleware)) {
             return app(Pipeline::class)
                 ->send($request)
-                ->through($layerConfig->middleware)
+                ->through(app(Router::class)->resolveMiddleware($layerConfig->middleware))
                 ->then(fn (Request $req) => $this->handle($req, $layerConfig, $queries));
         }
 

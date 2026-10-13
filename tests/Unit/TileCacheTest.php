@@ -33,6 +33,11 @@ it('appends a user hash for scoped layers', function () {
         ->toBe('vtiles:e0:trassen:v0:14:8532:5765:u'.md5('42'));
 });
 
+it('appends a user hash for every authenticated request', function () {
+    expect(app(TileCache::class)->buildKey(new Layer('trassen'), 14, 8532, 5765, cacheUser(42)))
+        ->toBe('vtiles:e0:trassen:v0:14:8532:5765:u'.md5('42'));
+});
+
 it('puts and gets a tile from cache', function () {
     $layer = new Layer('trassen');
     $cache = app(TileCache::class);

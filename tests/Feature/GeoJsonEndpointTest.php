@@ -150,3 +150,9 @@ it('clamps the bbox latitude for web mercator layers', function () {
     expect($queries[0]['query'])
         ->toMatch('/ST_Intersects\("geom", ST_Transform\(ST_MakeEnvelope\(-10, -85\.05112877\d*, 10, 85\.05112877\d*, 4326\), 3857\)\)/');
 });
+
+it('resolves middleware aliases for layer middleware', function () {
+    VectorTiles::layer('private')->from('trassen_table')->middleware(['auth']);
+
+    $this->getJson('/geojson/private?bbox=9.0,48.0,9.5,48.5')->assertUnauthorized();
+});

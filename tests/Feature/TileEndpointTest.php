@@ -198,3 +198,36 @@ it('still serves tiles and empty tiles when caching is disabled', function () {
     $this->get('/tiles/trassen/14/8532/5765.mvt')->assertOk();
     $this->get('/tiles/trassen/14/8532/5765.mvt')->assertNoContent();
 });
+
+it('never serves one user a tile cached for another user', function () {
+    VectorTiles::layer('tenant')
+        ->from('trassen_table')
+        ->middleware([\ItsJustVita\VectorTiles\Tests\Fixtures\PassThroughMiddleware::class]);
+
+    $driver = Mockery::mock(\ItsJustVita\VectorTiles\Drivers\TileDriverInterface::class);
+    $driver->shouldReceive('getTile')->andReturnUsing(
+        fn ($layer, $z, $x, $y, $user) => 'tile_for_'.$user->getAuthIdentifier(),
+    );
+    app()->instance(\ItsJustVita\VectorTiles\Drivers\TileDriverInterface::class, $driver);
+
+    $this->actingAs(new \Illuminate\Auth\GenericUser(['id' => 1]))
+        ->get('/tiles/tenant/14/8532/5765.mvt')
+        ->assertContent('tile_for_1');
+
+    $this->actingAs(new \Illuminate\Auth\GenericUser(['id' => 2]))
+        ->get('/tiles/tenant/14/8532/5765.mvt')
+        ->assertContent('tile_for_2');
+});
+
+it('resolves middleware aliases with parameters for layer middleware', function () {
+    app('router')->aliasMiddleware('vt.reject', \ItsJustVita\VectorTiles\Tests\Fixtures\RejectingMiddleware::class);
+    VectorTiles::layer('aliased')->from('trassen_table')->middleware(['vt.reject:extra']);
+
+    $this->get('/tiles/aliased/14/8532/5765.mvt')->assertUnauthorized();
+});
+
+it('supports the auth middleware alias on layers', function () {
+    VectorTiles::layer('private')->from('trassen_table')->middleware(['auth']);
+
+    $this->getJson('/tiles/private/14/8532/5765.mvt')->assertUnauthorized();
+});
