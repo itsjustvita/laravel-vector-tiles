@@ -2,6 +2,7 @@
 
 namespace ItsJustVita\VectorTiles\Cache;
 
+use Closure;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Support\Facades\Cache;
@@ -36,6 +37,24 @@ class TileCache
         $ttl = (int) config('vector-tiles.cache.ttl', 3600);
 
         $this->store()->put($this->buildKey($layer, $z, $x, $y, $user), $tile, $ttl);
+    }
+
+    /**
+     * Return the cached tile, or render and cache it. The key is computed once,
+     * so a flush during rendering stores the tile under the old version, where
+     * it is never read again.
+     *
+     * @param  Closure(): string  $render
+     */
+    public function remember(Layer $layer, int $z, int $x, int $y, ?Authenticatable $user, Closure $render): string
+    {
+        if (! $this->isEnabled()) {
+            return $render();
+        }
+
+        $ttl = (int) config('vector-tiles.cache.ttl', 3600);
+
+        return $this->store()->remember($this->buildKey($layer, $z, $x, $y, $user), $ttl, $render);
     }
 
     public function flushLayer(string $layerName): void

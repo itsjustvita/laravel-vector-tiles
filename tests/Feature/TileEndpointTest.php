@@ -231,3 +231,19 @@ it('supports the auth middleware alias on layers', function () {
 
     $this->getJson('/tiles/private/14/8532/5765.mvt')->assertUnauthorized();
 });
+
+it('renders again after a flush that happened while the tile was rendering', function () {
+    $driver = Mockery::mock(\ItsJustVita\VectorTiles\Drivers\TileDriverInterface::class);
+    $driver->shouldReceive('getTile')->twice()->andReturnUsing(
+        function () {
+            app(\ItsJustVita\VectorTiles\Cache\TileCache::class)->flushLayer('trassen');
+
+            return 'stale_tile';
+        },
+        fn () => 'fresh_tile',
+    );
+    app()->instance(\ItsJustVita\VectorTiles\Drivers\TileDriverInterface::class, $driver);
+
+    $this->get('/tiles/trassen/14/8532/5765.mvt')->assertContent('stale_tile');
+    $this->get('/tiles/trassen/14/8532/5765.mvt')->assertContent('fresh_tile');
+});

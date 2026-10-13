@@ -25,12 +25,10 @@ class TileController extends Controller
         $layerConfig = $manager->getLayer($layer);
         $user = $request->user();
 
-        $tile = $cache->get($layerConfig, $z, $x, $y, $user);
-
-        if ($tile === null) {
-            $tile = (string) $driver->getTile($layerConfig, $z, $x, $y, $user);
-            $cache->put($layerConfig, $z, $x, $y, $user, $tile);
-        }
+        $tile = $cache->remember(
+            $layerConfig, $z, $x, $y, $user,
+            fn () => (string) $driver->getTile($layerConfig, $z, $x, $y, $user),
+        );
 
         return $this->tileResponse($layerConfig, $tile);
     }

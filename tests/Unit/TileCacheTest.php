@@ -164,3 +164,65 @@ it('invalidates with the database cache store, whose increment fails on missing 
     expect($cache->get($layer, 14, 8532, 5765))->toBeNull()
         ->and($cache->buildKey($layer, 14, 8532, 5765))->toBe('vtiles:e0:trassen:v2:14:8532:5765');
 });
+
+it('renders on a miss and serves the remembered tile afterwards', function () {
+    $layer = new Layer('trassen');
+    $cache = app(TileCache::class);
+    $calls = 0;
+    $render = function () use (&$calls) {
+        $calls++;
+
+        return 'tile';
+    };
+
+    expect($cache->remember($layer, 14, 8532, 5765, null, $render))->toBe('tile')
+        ->and($cache->remember($layer, 14, 8532, 5765, null, $render))->toBe('tile')
+        ->and($calls)->toBe(1);
+});
+
+it('remembers empty tiles', function () {
+    $layer = new Layer('trassen');
+    $cache = app(TileCache::class);
+    $calls = 0;
+    $render = function () use (&$calls) {
+        $calls++;
+
+        return '';
+    };
+
+    $cache->remember($layer, 14, 8532, 5765, null, $render);
+
+    expect($cache->remember($layer, 14, 8532, 5765, null, $render))->toBe('')
+        ->and($calls)->toBe(1);
+});
+
+it('always renders when caching is disabled', function () {
+    config()->set('vector-tiles.cache.enabled', false);
+    $layer = new Layer('trassen');
+    $cache = app(TileCache::class);
+    $calls = 0;
+    $render = function () use (&$calls) {
+        $calls++;
+
+        return 'tile';
+    };
+
+    $cache->remember($layer, 14, 8532, 5765, null, $render);
+    $cache->remember($layer, 14, 8532, 5765, null, $render);
+
+    expect($calls)->toBe(2);
+});
+
+it('never serves a tile rendered across a flush', function () {
+    $layer = new Layer('trassen');
+    $cache = app(TileCache::class);
+
+    $cache->remember($layer, 14, 8532, 5765, null, function () use ($cache) {
+        // The data changes and the layer is flushed while this tile renders.
+        $cache->flushLayer('trassen');
+
+        return 'stale_tile';
+    });
+
+    expect($cache->remember($layer, 14, 8532, 5765, null, fn () => 'fresh_tile'))->toBe('fresh_tile');
+});
