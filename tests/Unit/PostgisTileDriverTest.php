@@ -26,7 +26,7 @@ function trassenModel(): Model
     };
 }
 
-it('builds correct SQL for simple table layer', function () {
+it('builds an index-friendly tile query for a 4326 table layer', function () {
     $layer = (new Layer('trassen'))
         ->from('trassen_table')
         ->geometry('geom')
@@ -36,20 +36,18 @@ it('builds correct SQL for simple table layer', function () {
 
     expect($queries)->toHaveCount(1);
 
-    $sql = $queries[0]['query'];
-    expect($sql)
-        ->toContain('ST_AsMVT')
-        ->toContain('ST_AsMVTGeom')
-        ->toContain('ST_Transform("geom", 3857)')
-        ->toContain('ST_TileEnvelope(14, 8532, 5765)')
+    expect($queries[0]['query'])
+        ->toContain("ST_AsMVT(tile, 'trassen'::text, 4096::int4, '__vt_geom')")
+        ->toContain('ST_AsMVTGeom(ST_Transform("geom", 3857), ST_TileEnvelope(14, 8532, 5765), 4096::int4, 256::int4, true) AS __vt_geom')
+        ->toMatch('/"geom" && ST_Transform\(ST_MakeEnvelope\([-\d., E+]+, 3857\), 4326\)/')
         ->toContain('"trassen_table"')
-        ->toContain('ST_Intersects')
         ->toContain('"id"')
         ->toContain('"typ"')
-        ->toContain('"status"');
+        ->toContain('"status"')
+        ->not->toContain('ST_Intersects');
 });
 
-it('returns null when the underlying query returns no tile', function () {
+it('returns an empty string when the query yields no tile', function () {
     $layer = (new Layer('trassen'))->from('trassen_table');
 
     $result = null;
@@ -57,7 +55,7 @@ it('returns null when the underlying query returns no tile', function () {
         $result = $this->driver->getTile($layer, 14, 8532, 5765);
     });
 
-    expect($result)->toBeNull();
+    expect($result)->toBe('');
 });
 
 it('uses configured connection', function () {
@@ -76,7 +74,7 @@ it('uses configured connection', function () {
     expect($queries[0]['query'])->toContain('ST_AsMVT');
 });
 
-it('uses custom extent and buffer', function () {
+it('passes a custom extent to both mvt functions', function () {
     $layer = (new Layer('trassen'))
         ->from('trassen_table')
         ->extent(8192)
@@ -85,8 +83,8 @@ it('uses custom extent and buffer', function () {
     $queries = captureTileQueries(fn () => $this->driver->getTile($layer, 14, 8532, 5765));
 
     expect($queries[0]['query'])
-        ->toContain('8192')
-        ->toContain('512');
+        ->toContain("ST_AsMVT(tile, 'trassen'::text, 8192::int4, '__vt_geom')")
+        ->toContain('8192::int4, 512::int4, true');
 });
 
 it('handles eloquent builder source', function () {
@@ -212,4 +210,24 @@ it('builds identical queries for repeated requests', function () {
     $second = captureTileQueries(fn () => $this->driver->getTile($layer, 14, 8532, 5765));
 
     expect(array_column($second, 'query'))->toBe(array_column($first, 'query'));
+});
+
+it('uses geometry and envelope as-is for 3857 layers', function () {
+    $layer = (new Layer('merc'))->from('merc_table')->srid(3857);
+
+    $queries = captureTileQueries(fn () => $this->driver->getTile($layer, 14, 8532, 5765));
+
+    expect($queries[0]['query'])
+        ->toContain('ST_AsMVTGeom("geom", ST_TileEnvelope(14, 8532, 5765)')
+        ->toMatch('/"geom" && ST_MakeEnvelope\([-\d., E+]+, 3857\)/')
+        ->not->toContain('ST_Transform');
+});
+
+it('transforms the geometry instead of the envelope for other srids', function () {
+    $layer = (new Layer('utm'))->from('utm_table')->srid(25832);
+
+    $queries = captureTileQueries(fn () => $this->driver->getTile($layer, 14, 8532, 5765));
+
+    expect($queries[0]['query'])
+        ->toMatch('/ST_Transform\("geom", 3857\) && ST_MakeEnvelope\([-\d., E+]+, 3857\)/');
 });
