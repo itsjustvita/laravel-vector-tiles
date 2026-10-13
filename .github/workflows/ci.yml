@@ -11,6 +11,20 @@ jobs:
     name: PHP ${{ matrix.php }} / Laravel ${{ matrix.laravel }} (${{ matrix.stability }})
     runs-on: ubuntu-latest
 
+    services:
+      postgis:
+        image: postgis/postgis:16-3.5
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: vector_tiles
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     strategy:
       fail-fast: false
       matrix:
@@ -63,4 +77,10 @@ jobs:
         run: composer audit --no-dev
 
       - name: Run tests
-        run: vendor/bin/pest --compact
+        run: vendor/bin/pest --compact --fail-on-skipped
+        env:
+          VT_PGSQL_HOST: 127.0.0.1
+          VT_PGSQL_PORT: 5432
+          VT_PGSQL_DATABASE: vector_tiles
+          VT_PGSQL_USERNAME: postgres
+          VT_PGSQL_PASSWORD: postgres

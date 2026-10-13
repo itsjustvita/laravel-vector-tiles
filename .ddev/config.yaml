@@ -6,7 +6,12 @@ webserver_type: nginx-fpm
 xdebug_enabled: false
 disable_settings_management: true
 composer_version: "2"
-web_environment: []
+web_environment:
+  - VT_PGSQL_HOST=db
+  - VT_PGSQL_PORT=5432
+  - VT_PGSQL_DATABASE=db
+  - VT_PGSQL_USERNAME=db
+  - VT_PGSQL_PASSWORD=db
 database:
   type: postgres
   version: "16"
