@@ -60,3 +60,12 @@ it('queries eloquent sources on the model connection', function () {
         ->assertOk()
         ->assertJsonCount(1, 'features');
 });
+
+it('returns an empty collection for a polar bbox on web mercator layers', function () {
+    $this->createPoints('vt_merc', [[0.0, 10.0]], 3857);
+    VectorTiles::layer('merc')->from('vt_merc')->srid(3857);
+
+    $this->getJson('/geojson/merc?bbox=0,90,10,90')
+        ->assertOk()
+        ->assertJsonCount(0, 'features');
+});

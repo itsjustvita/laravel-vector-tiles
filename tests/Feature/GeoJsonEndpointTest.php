@@ -171,3 +171,9 @@ it('applies neither the zoom filter nor simplification', function () {
         ->not->toContain('"major"')
         ->not->toContain('ST_Simplify');
 });
+
+it('returns 422 for a bbox given as an array', function () {
+    $this->getJson('/geojson/trassen?bbox[]=1')
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['bbox']);
+});
