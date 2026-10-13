@@ -36,14 +36,23 @@ class InstallCommand extends Command
     protected function checkPostgis(): void
     {
         try {
-            $result = DB::selectOne('SELECT PostGIS_Version() AS version');
-            $this->components->task(
-                "PostGIS detected: v{$result->version}"
-            );
+            $version = DB::selectOne('SELECT PostGIS_Lib_Version() AS version')->version;
         } catch (\Throwable) {
             $this->components->warn(
                 'PostGIS not detected. Make sure PostGIS is installed and enabled on your database.'
             );
+
+            return;
         }
+
+        if (version_compare($version, '3.0.0', '<')) {
+            $this->components->warn(
+                "PostGIS {$version} detected. Laravel Vector Tiles requires PostGIS 3.0 or newer."
+            );
+
+            return;
+        }
+
+        $this->components->task("PostGIS detected: v{$version}");
     }
 }
