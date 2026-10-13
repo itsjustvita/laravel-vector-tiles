@@ -77,3 +77,22 @@ it('applies throttle middleware from config to tilejson route', function () {
     expect($route)->not->toBeNull();
     expect($route->gatherMiddleware())->toContain('throttle:60,1');
 });
+
+it('blocks tilejson requests when layer middleware rejects the request', function () {
+    VectorTiles::layer('protected')
+        ->from('trassen_table')
+        ->middleware([\ItsJustVita\VectorTiles\Tests\Fixtures\RejectingMiddleware::class]);
+
+    $this->getJson('/tiles/protected.json')->assertUnauthorized();
+});
+
+it('requires authentication for tilejson of layers with the auth middleware', function () {
+    VectorTiles::layer('private')->from('trassen_table')->middleware(['auth']);
+
+    $this->getJson('/tiles/private.json')->assertUnauthorized();
+
+    $this->actingAs(new \Illuminate\Auth\GenericUser(['id' => 1]))
+        ->getJson('/tiles/private.json')
+        ->assertOk()
+        ->assertJsonPath('name', 'private');
+});

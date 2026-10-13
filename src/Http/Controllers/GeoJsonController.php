@@ -4,10 +4,9 @@ namespace ItsJustVita\VectorTiles\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Pipeline\Pipeline;
 use Illuminate\Routing\Controller;
-use Illuminate\Routing\Router;
 use InvalidArgumentException;
+use ItsJustVita\VectorTiles\Http\Concerns\RunsLayerMiddleware;
 use ItsJustVita\VectorTiles\Layer;
 use ItsJustVita\VectorTiles\Query\BboxFilter;
 use ItsJustVita\VectorTiles\Query\LayerQueryFactory;
@@ -16,6 +15,8 @@ use Symfony\Component\HttpFoundation\Response;
 
 class GeoJsonController extends Controller
 {
+    use RunsLayerMiddleware;
+
     public function __invoke(
         Request $request,
         VectorTileManager $manager,
@@ -28,14 +29,11 @@ class GeoJsonController extends Controller
             abort(404, "Layer '{$layer}' not found.");
         }
 
-        if (! empty($layerConfig->middleware)) {
-            return app(Pipeline::class)
-                ->send($request)
-                ->through(app(Router::class)->resolveMiddleware($layerConfig->middleware))
-                ->then(fn (Request $req) => $this->handle($req, $layerConfig, $queries));
-        }
-
-        return $this->handle($request, $layerConfig, $queries);
+        return $this->throughLayerMiddleware(
+            $request,
+            $layerConfig,
+            fn (Request $req) => $this->handle($req, $layerConfig, $queries),
+        );
     }
 
     protected function handle(Request $request, Layer $layerConfig, LayerQueryFactory $queries): JsonResponse

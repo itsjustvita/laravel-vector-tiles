@@ -4,13 +4,14 @@ namespace ItsJustVita\VectorTiles\Http\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
-use Illuminate\Pipeline\Pipeline;
-use Illuminate\Routing\Router;
+use ItsJustVita\VectorTiles\Http\Concerns\RunsLayerMiddleware;
 use ItsJustVita\VectorTiles\VectorTileManager;
 use Symfony\Component\HttpFoundation\Response;
 
 class ValidateTileRequest
 {
+    use RunsLayerMiddleware;
+
     public function __construct(
         protected VectorTileManager $manager,
     ) {}
@@ -39,13 +40,6 @@ class ValidateTileRequest
             abort(422, "Y coordinate {$y} is outside bounds [0, {$maxTile}] for zoom {$z}.");
         }
 
-        if (! empty($layer->middleware)) {
-            return app(Pipeline::class)
-                ->send($request)
-                ->through(app(Router::class)->resolveMiddleware($layer->middleware))
-                ->then(fn ($req) => $next($req));
-        }
-
-        return $next($request);
+        return $this->throughLayerMiddleware($request, $layer, fn (Request $req) => $next($req));
     }
 }

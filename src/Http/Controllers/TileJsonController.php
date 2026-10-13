@@ -2,14 +2,18 @@
 
 namespace ItsJustVita\VectorTiles\Http\Controllers;
 
-use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
+use ItsJustVita\VectorTiles\Http\Concerns\RunsLayerMiddleware;
 use ItsJustVita\VectorTiles\Layer;
 use ItsJustVita\VectorTiles\VectorTileManager;
+use Symfony\Component\HttpFoundation\Response;
 
 class TileJsonController extends Controller
 {
-    public function __invoke(VectorTileManager $manager, string $layer): JsonResponse
+    use RunsLayerMiddleware;
+
+    public function __invoke(Request $request, VectorTileManager $manager, string $layer): Response
     {
         $layerConfig = $manager->getLayer($layer);
 
@@ -17,7 +21,11 @@ class TileJsonController extends Controller
             abort(404, "Layer '{$layer}' not found.");
         }
 
-        return response()->json($this->buildTileJson($layerConfig));
+        return $this->throughLayerMiddleware(
+            $request,
+            $layerConfig,
+            fn () => response()->json($this->buildTileJson($layerConfig)),
+        );
     }
 
     /**
