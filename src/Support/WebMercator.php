@@ -18,7 +18,7 @@ final class WebMercator
      */
     public static function tileBounds(int $z, int $x, int $y, float $margin = 0.0): array
     {
-        $size = 2 * self::MAX_EXTENT / (2 ** $z);
+        $size = self::tileWidth($z);
         $pad = $size * $margin;
 
         return [
@@ -27,5 +27,30 @@ final class WebMercator
             min(-self::MAX_EXTENT + ($x + 1) * $size + $pad, self::MAX_EXTENT),
             min(self::MAX_EXTENT - $y * $size + $pad, self::MAX_EXTENT),
         ];
+    }
+
+    /**
+     * Width of a tile at zoom $z in EPSG:3857 meters.
+     */
+    public static function tileWidth(int $z): float
+    {
+        return 2 * self::MAX_EXTENT / (2 ** $z);
+    }
+
+    /**
+     * The tile containing a WGS84 position. Positions beyond the Web Mercator
+     * latitude limit or on the antimeridian map to the nearest edge tile.
+     *
+     * @return array{0: int, 1: int} x, y
+     */
+    public static function tileAt(float $lon, float $lat, int $z): array
+    {
+        $n = 2 ** $z;
+        $latRad = deg2rad(max(-self::MAX_LATITUDE, min(self::MAX_LATITUDE, $lat)));
+
+        $x = (int) floor(($lon + 180) / 360 * $n);
+        $y = (int) floor((1 - log(tan($latRad) + 1 / cos($latRad)) / M_PI) / 2 * $n);
+
+        return [max(0, min($n - 1, $x)), max(0, min($n - 1, $y))];
     }
 }
