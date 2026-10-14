@@ -44,9 +44,15 @@ class LayerDoctor
         $connectionName = $connection->getName();
 
         try {
+            $connection->getPdo();
+        } catch (Throwable $e) {
+            return [Check::fail("Cannot connect to connection {$connectionName}: ".$this->reason($e))];
+        }
+
+        try {
             $version = (string) $this->probe($connection, fn () => $connection->selectOne('SELECT postgis_lib_version() AS version')->version);
-        } catch (Throwable) {
-            return [Check::fail("PostGIS is not available on connection {$connectionName}", 'CREATE EXTENSION postgis;')];
+        } catch (Throwable $e) {
+            return [Check::fail("PostGIS is not available on connection {$connectionName}: ".$this->reason($e), 'CREATE EXTENSION postgis;')];
         }
 
         if (version_compare($version, '3.0.0', '<')) {
@@ -171,7 +177,8 @@ class LayerDoctor
 
     /**
      * Lets PostgreSQL plan a real tile query with sequential scans disabled.
-     * A Seq Scan that remains means no index can serve the tile filter.
+     * The tile filter must end up in an index condition; as a plain filter it
+     * is checked row by row, even when another index finds the rows.
      *
      * @return list<Check>
      */
@@ -194,20 +201,27 @@ class LayerDoctor
         }
 
         $plan = json_decode($row->{'QUERY PLAN'}, true);
-        $relations = array_values(array_unique($this->seqScannedRelations($plan[0]['Plan'])));
+        [$unindexed, $indexed] = $this->tileFilterNodes($plan[0]['Plan']);
 
-        if ($relations === []) {
+        if ($unindexed === [] && $indexed) {
             return [Check::pass('Spatial index is used')];
+        }
+
+        if ($unindexed === []) {
+            return [Check::warn(
+                'No usable spatial index (the tile filter is missing from the query plan)',
+                $table === null ? null : $this->indexStatement($table, $layer),
+            )];
         }
 
         $sourceName = $table === null ? null : Str::afterLast($table, '.');
 
-        return array_map(fn (string $relation) => Check::warn(
-            "No usable spatial index (Seq Scan on {$relation})",
-            $relation === $sourceName
+        return array_map(fn (array $node) => Check::warn(
+            "No usable spatial index ({$node[0]} on {$node[1]})",
+            $node[1] === $sourceName
                 ? $this->indexStatement($table, $layer)
-                : "If {$relation} holds the geometry column, index it there:\n".$this->indexStatement($relation, $layer),
-        ), $relations);
+                : "If {$node[1]} holds the geometry column, index it there:\n".$this->indexStatement($node[1], $layer),
+        ), array_values($unindexed));
     }
 
     /**
@@ -233,18 +247,30 @@ class LayerDoctor
     }
 
     /**
+     * Where the plan applies the tile filter, the && bounding box comparison.
+     *
      * @param  array<string, mixed>  $node
-     * @return list<string>
+     * @return array{0: array<string, array{0: string, 1: string}>, 1: bool} node type and relation of every node
+     *     that applies it as a plain filter, keyed by relation, and whether an index condition applies it
      */
-    protected function seqScannedRelations(array $node): array
+    protected function tileFilterNodes(array $node): array
     {
-        $relations = $node['Node Type'] === 'Seq Scan' ? [$node['Relation Name'] ?? '?'] : [];
+        $unindexed = [];
+        $indexed = str_contains($node['Index Cond'] ?? '', ' && ')
+            || str_contains($node['Recheck Cond'] ?? '', ' && ');
 
-        foreach ($node['Plans'] ?? [] as $child) {
-            array_push($relations, ...$this->seqScannedRelations($child));
+        if (str_contains($node['Filter'] ?? '', ' && ')) {
+            $relation = $node['Relation Name'] ?? $node['Alias'] ?? '?';
+            $unindexed[$relation] = [$node['Node Type'], $relation];
         }
 
-        return $relations;
+        foreach ($node['Plans'] ?? [] as $child) {
+            [$childUnindexed, $childIndexed] = $this->tileFilterNodes($child);
+            $unindexed += $childUnindexed;
+            $indexed = $indexed || $childIndexed;
+        }
+
+        return [$unindexed, $indexed];
     }
 
     protected function indexStatement(string $table, Layer $layer): string

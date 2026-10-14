@@ -122,3 +122,11 @@ it('stores the zoom filter', function () {
     expect((new Layer('roads'))->filterByZoom($filter)->zoomFilter)->toBe($filter)
         ->and((new Layer('roads'))->zoomFilter)->toBeNull();
 });
+
+it('treats an empty or zero simplify config value as off', function (mixed $value) {
+    expect(Layer::fromConfig('roads', ['simplify' => $value])->simplify)->toBeNull();
+})->with([0, 0.0, '', false, '0']);
+
+it('still rejects a negative simplify config value', function () {
+    expect(fn () => Layer::fromConfig('roads', ['simplify' => -1]))->toThrow(InvalidArgumentException::class);
+});

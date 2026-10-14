@@ -34,6 +34,7 @@ class TileSampler
         $query->select([])
             ->selectRaw("{$geometry} AS __vt_geom")
             ->whereNotNull($layer->geometry)
+            ->reorder()
             ->orderByRaw('random()')
             ->limit($limit);
 

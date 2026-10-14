@@ -16,3 +16,17 @@ it('stops at the requested number of tiles per zoom level', function () {
 
     expect(TileSampler::tiles($points, [10], 1))->toBe([[10, 558, 355]]);
 });
+
+it('samples in random order even when the source is ordered', function () {
+    $model = new class extends \Illuminate\Database\Eloquent\Model
+    {
+        protected $table = 'vt_points';
+    };
+    $layer = (new \ItsJustVita\VectorTiles\Layer('points'))->from($model->newQuery()->orderBy('id'));
+
+    $queries = \Illuminate\Support\Facades\DB::pretend(fn () => app(TileSampler::class)->points($layer, 10));
+
+    expect($queries[0]['query'])
+        ->toContain('order by random()')
+        ->not->toContain('"id" asc');
+});

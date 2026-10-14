@@ -186,3 +186,59 @@ it('runs a scope that needs a user as the given user', function () {
         ->and($unknownUser)->toBe(1)
         ->and($unknownOutput)->toContain("User '99' not found.");
 });
+
+it('warns when only a non-spatial index keeps postgres from a sequential scan', function () {
+    $this->createPoints('vt_points', [[16.37, 48.21]], index: false);
+    // A column default instead of an UPDATE, so the new index is usable inside the test transaction.
+    DB::statement('ALTER TABLE vt_points ADD COLUMN owner_id integer NOT NULL DEFAULT 1');
+    DB::statement('CREATE INDEX vt_points_owner_id_idx ON vt_points (owner_id)');
+    DB::statement('ANALYZE vt_points');
+    VectorTiles::layer('points')->from('vt_points')->scope(fn ($query) => $query->where('owner_id', 1));
+
+    [$exitCode, $output] = runDoctor(['layer' => 'points', '--strict' => true]);
+
+    expect($exitCode)->toBe(1)
+        ->and($output)
+        ->toContain('⚠ No usable spatial index')
+        ->toContain('CREATE INDEX vt_points_geom_idx ON vt_points USING gist (geom);')
+        ->not->toContain('Spatial index is used');
+});
+
+it('warns for an ordered source without a spatial index', function () {
+    $this->createPoints('vt_points', [[16.37, 48.21]], index: false);
+    $model = new class extends Model
+    {
+        protected $table = 'vt_points';
+    };
+    VectorTiles::layer('points')->from($model->newQuery()->orderBy('id'));
+
+    [$exitCode, $output] = runDoctor(['layer' => 'points', '--strict' => true]);
+
+    expect($exitCode)->toBe(1)
+        ->and($output)
+        ->toContain('⚠ No usable spatial index')
+        ->not->toContain('Spatial index is used');
+});
+
+it('acts as the given user for global scopes that read the authenticated user', function () {
+    $this->createPoints('vt_points', [[16.37, 48.21]]);
+    $this->createUsers();
+    $model = new class extends Model
+    {
+        protected $table = 'vt_points';
+
+        protected static function booted(): void
+        {
+            static::addGlobalScope('mine', fn ($query) => $query->where(
+                'name',
+                \Illuminate\Support\Facades\Auth::user()?->name ?? throw new RuntimeException('Needs an authenticated user.'),
+            ));
+        }
+    };
+    VectorTiles::layer('mine')->from($model->newQuery());
+
+    [$exitCode, $output] = runDoctor(['layer' => 'mine', '--user' => '7']);
+
+    expect($output)->not->toContain('✗')
+        ->and($exitCode)->toBe(0);
+});

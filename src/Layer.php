@@ -43,7 +43,7 @@ class Layer
         $layer->buffer = $config['buffer'] ?? 256;
         $layer->connection = $config['connection'] ?? null;
 
-        if (isset($config['simplify'])) {
+        if (! empty($config['simplify'])) {
             $layer->simplify((float) $config['simplify']);
         }
 

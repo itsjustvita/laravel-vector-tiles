@@ -9,7 +9,8 @@ use InvalidArgumentException;
 trait ResolvesUser
 {
     /**
-     * The user given with --user, loaded through the default guard's provider.
+     * The user given with --user, loaded through the default guard's provider
+     * and set on that guard, so global scopes and policies see it as well.
      *
      * @throws InvalidArgumentException when the user does not exist
      */
@@ -27,6 +28,8 @@ trait ResolvesUser
         if ($user === null) {
             throw new InvalidArgumentException("User '{$id}' not found.");
         }
+
+        Auth::guard($guard)->setUser($user);
 
         return $user;
     }

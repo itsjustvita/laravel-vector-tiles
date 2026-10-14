@@ -100,7 +100,7 @@ VectorTiles::layer('roads')
     });
 ```
 
-`simplify()` takes a tolerance in screen pixels of a 512 px tile, so lines look the same while detail below the screen resolution is dropped. Values between 1 and 2 work well. Polygons smaller than the tolerance disappear. Tiles at the layer's `maxZoom` keep full detail, because map clients overzoom them. In config arrays, use the `simplify` key.
+`simplify()` takes a tolerance in screen pixels of a 512 px tile, so lines look the same while detail below the screen resolution is dropped. Values between 1 and 2 work well. Polygons smaller than the tolerance disappear. Tiles at the layer's `maxZoom` keep full detail, because map clients overzoom them. In config arrays, use the `simplify` key; `0` or an empty value turns simplification off.
 
 `filterByZoom()` receives the query and the zoom level and runs after the layer scope. Neither option applies to the GeoJSON endpoint, which has no zoom level.
 
