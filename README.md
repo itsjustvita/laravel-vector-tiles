@@ -53,7 +53,38 @@ VectorTiles::layer('buildings')
 
 Eloquent sources run on the model's database connection. For table sources, set the connection with `->connection('gis')` or the `connection` config key.
 
-Tiles are served at `GET /tiles/{layer}/{z}/{x}/{y}.mvt`.
+### Layer Options
+
+| Config key | Fluent method | Default | Description |
+|------------|---------------|---------|-------------|
+| `table` | `from()` | layer name | Source table; `from()` also accepts an Eloquent query |
+| `geometry` | `geometry()` | `geom` | Geometry column |
+| `srid` | `srid()` | `4326` | SRID of the geometry column |
+| `properties` | `properties()` | `[]` | Columns included as feature attributes |
+| `min_zoom` | `minZoom()` | `0` | Lowest zoom level served |
+| `max_zoom` | `maxZoom()` | `22` | Highest zoom level served |
+| `simplify` | `simplify()` | off | Simplification tolerance in pixels, see [Zoom-Dependent Simplification](#zoom-dependent-simplification-and-filtering) |
+| `middleware` | `middleware()` | `[]` | Middleware for this layer, see [Auth-Aware Tiles](#auth-aware-tiles) |
+| `connection` | `connection()` | default connection | Database connection of table sources |
+| `extent` | `extent()` | `4096` | Tile coordinate resolution |
+| `buffer` | `buffer()` | `256` | Area around the tile, in extent units, from which features are included, so labels and icons at tile edges are not clipped |
+| | `scope()` | | Per-user filter, see [Auth-Aware Tiles](#auth-aware-tiles) |
+| | `filterByZoom()` | | Per-zoom filter, see [Zoom-Dependent Simplification](#zoom-dependent-simplification-and-filtering) |
+| | `invalidateOn()` | | Model whose changes flush the layer, see [Cache Invalidation](#cache-invalidation) |
+
+If your data is not stored in EPSG:4326, set its SRID, for example `->srid(25832)`. `php artisan vector-tiles:doctor` reports a mismatch.
+
+### Endpoints
+
+| Endpoint | Returns |
+|----------|---------|
+| `GET /tiles/{layer}/{z}/{x}/{y}.mvt` | The vector tile |
+| `GET /tiles/{layer}.json` | [TileJSON 3.0.0](https://github.com/mapbox/tilejson-spec) metadata: tile URL, zoom range and property names |
+| `GET /geojson/{layer}?bbox=…` | Features in a bounding box, see [GeoJSON Endpoint](#geojson-endpoint) |
+
+The URL prefixes are set with `prefix` and `geojson.prefix` in the config. Layer middleware applies to all three endpoints.
+
+An unknown layer returns `404`. A zoom level outside the layer's zoom range, or an `x` or `y` outside the tile grid of the zoom level, returns `422`. A tile without features returns `204 No Content`.
 
 ### Auth-Aware Tiles
 
@@ -81,6 +112,17 @@ VectorTiles::layer('buildings')
     ->from(Building::query())
     ->invalidateOn(Building::class);
 ```
+
+To flush cached tiles yourself, for example after a bulk import that bypasses model events, use the `TileCache` service:
+
+```php
+use ItsJustVita\VectorTiles\Cache\TileCache;
+
+app(TileCache::class)->flushLayer('buildings');
+app(TileCache::class)->flushAll();
+```
+
+Flushing only affects the server-side cache. Browsers keep tiles they already loaded for up to `cache.ttl` seconds, see [HTTP Caching](#http-caching-and-compression).
 
 ### Zoom-Dependent Simplification and Filtering
 
@@ -125,11 +167,28 @@ Run `php artisan vector-tiles:doctor` to check whether PostgreSQL can use an ind
 
 Tiles are sent with `Cache-Control: public, max-age={cache.ttl}`. As soon as a layer has middleware or a scope, or global middleware is configured, tiles are sent as `private`, so shared caches and CDNs never serve one user's tiles to another.
 
-Empty tiles return `204 No Content` and are cached as well.
+Empty tiles (`204 No Content`) are cached as well.
 
-Cached tiles are stored per layer, tile and authenticated user, so a user never receives a tile rendered for someone else. If a scope depends on something other than the user, such as the current team, flush the layer when that context changes.
+Cached tiles are stored per layer, tile and authenticated user, so a user never receives a tile rendered for someone else. If a scope depends on something other than the user, such as the current team, [flush the layer](#cache-invalidation) when that context changes.
 
 The package does not compress tiles itself. Enable compression for `application/vnd.mapbox-vector-tile` in your web server, for example `encode gzip zstd` in Caddy or `gzip_types application/vnd.mapbox-vector-tile;` in nginx.
+
+### Rate Limiting
+
+All tile, TileJSON and GeoJSON routes are throttled to 60 requests per minute by default, per IP address, or per user if the global `middleware` authenticates the request. A map loads many tiles at once: one view needs a dozen or more tiles per layer, and every pan or zoom loads new ones. For real maps, raise the limit, use a named rate limiter, or turn throttling off:
+
+```php
+// config/vector-tiles.php
+'throttle' => '600,1', // 600 requests per minute
+'throttle' => 'tiles', // a limiter defined with RateLimiter::for('tiles', ...)
+'throttle' => null,    // no rate limiting
+```
+
+### CORS
+
+Tile responses carry `Access-Control-Allow-Origin: *`, so maps on other domains can load them. Set `cors.allowed_origins` to a single origin to restrict this, or to `null` to omit the header.
+
+The TileJSON and GeoJSON endpoints do not send this header. To call them from another domain, let Laravel's CORS middleware handle all routes instead: set `cors.allowed_origins` to `null`, run `php artisan config:publish cors` and add your prefixes to `paths` in `config/cors.php`, for example `'tiles/*'` and `'geojson/*'`.
 
 ### GeoJSON Endpoint
 
@@ -143,7 +202,26 @@ The `bbox` is `west,south,east,north` in WGS84 and must lie within [-180, 180] /
 
 ### MapLibre Integration
 
-Generate source configuration for MapLibre GL JS:
+Point a MapLibre GL JS source at the layer's TileJSON URL. The `source-layer` is the layer name:
+
+```js
+map.on('load', () => {
+    map.addSource('buildings', {
+        type: 'vector',
+        url: 'https://example.com/tiles/buildings.json',
+    });
+
+    map.addLayer({
+        id: 'buildings',
+        type: 'fill',
+        source: 'buildings',
+        'source-layer': 'buildings',
+        paint: { 'fill-color': '#4a90d9', 'fill-opacity': 0.6 },
+    });
+});
+```
+
+Or generate the source configuration in PHP, for example to pass it to your frontend:
 
 ```php
 $source = VectorTiles::maplibreSource('buildings');
@@ -200,14 +278,17 @@ Timings cover the SQL query and the MVT encoding, without HTTP and cache. Sampli
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `prefix` | `tiles` | URL prefix for tile routes |
+| `prefix` | `tiles` | URL prefix for tile and TileJSON routes |
 | `middleware` | `[]` | Global middleware for all routes |
+| `throttle` | `60,1` | Rate limit for all routes, see [Rate Limiting](#rate-limiting); `null` turns it off |
 | `cache.enabled` | `true` | Enable tile caching |
 | `cache.store` | `null` | Cache store (null = default) |
-| `cache.ttl` | `3600` | Cache TTL in seconds |
+| `cache.ttl` | `3600` | Cache TTL in seconds, also sent as `max-age` |
+| `cors.allowed_origins` | `*` | `Access-Control-Allow-Origin` of tile responses, see [CORS](#cors); `null` omits it |
 | `geojson.prefix` | `geojson` | URL prefix for GeoJSON routes |
 | `geojson.default_limit` | `1000` | Default feature limit |
 | `geojson.max_limit` | `5000` | Maximum feature limit |
+| `layers` | `[]` | Layer definitions, see [Layer Options](#layer-options) |
 
 ## Testing
 
@@ -222,6 +303,7 @@ $response = $this->get('/tiles/buildings/14/8532/5765.mvt');
 $response->assertOk();
 
 VectorTiles::assertTileRequested('buildings', 14, 8532, 5765);
+VectorTiles::assertTileNotRequested('buildings', 14, 8533, 5765);
 ```
 
 ## How It Works
