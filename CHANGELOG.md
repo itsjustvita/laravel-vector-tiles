@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Tiles and TileJSON are no longer throttled by default, because a single map view loads many tiles. The GeoJSON endpoint keeps its limit of 60 requests per minute through the new `geojson.throttle` key, which falls back to `throttle` when it is missing. If you published the config, set `throttle` to `null` to remove the limit for tiles.
+
+### Fixed
+
+- The TileJSON and GeoJSON endpoints did not send the `cors.allowed_origins` header, so maps on other origins could not load the TileJSON metadata. Error responses such as `404` and `429` now carry it as well.
+- Tile and GeoJSON requests shared their request count with every other route of the application that used the same plain throttle setting.
+
 ## [0.3.0] - 2026-10-14
 
 ### Added

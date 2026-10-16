@@ -175,20 +175,30 @@ The package does not compress tiles itself. Enable compression for `application/
 
 ### Rate Limiting
 
-All tile, TileJSON and GeoJSON routes are throttled to 60 requests per minute by default, per IP address, or per user if the global `middleware` authenticates the request. A map loads many tiles at once: one view needs a dozen or more tiles per layer, and every pan or zoom loads new ones. For real maps, raise the limit, use a named rate limiter, or turn throttling off:
+A map loads many tiles at once: one view needs a dozen or more tiles per layer, and every pan or zoom loads new ones. Tiles and TileJSON are therefore not throttled by default. The GeoJSON endpoint is limited to 60 requests per minute, per IP address, or per user if the global `middleware` authenticates the request.
+
+Both limits take a number of requests and minutes, the name of a rate limiter, or `null`:
 
 ```php
 // config/vector-tiles.php
-'throttle' => '600,1', // 600 requests per minute
+'throttle' => '600,1', // tiles and TileJSON: 600 requests per minute
 'throttle' => 'tiles', // a limiter defined with RateLimiter::for('tiles', ...)
-'throttle' => null,    // no rate limiting
+
+'geojson' => [
+    // ...
+    'throttle' => null, // GeoJSON: no rate limiting
+],
 ```
+
+Requests to the package routes are counted separately from other throttled routes of your application, and tiles separately from GeoJSON.
+
+If you published the config before 0.3.1, it still contains `'throttle' => '60,1'`, which limits tiles to 60 requests per minute and also applies to the GeoJSON endpoint as long as `geojson.throttle` is missing. Set `throttle` to `null` and add `geojson.throttle` to get the new defaults.
 
 ### CORS
 
-Tile responses carry `Access-Control-Allow-Origin: *`, so maps on other domains can load them. Set `cors.allowed_origins` to a single origin to restrict this, or to `null` to omit the header.
+All responses of the package routes carry `Access-Control-Allow-Origin: *`, including errors such as `404` or `429`, so maps on other domains can load tiles, TileJSON and GeoJSON. Set `cors.allowed_origins` to a single origin to restrict this, or to `null` to omit the header. An `Access-Control-Allow-Origin` set by your own middleware is kept.
 
-The TileJSON and GeoJSON endpoints do not send this header. To call them from another domain, let Laravel's CORS middleware handle all routes instead: set `cors.allowed_origins` to `null`, run `php artisan config:publish cors` and add your prefixes to `paths` in `config/cors.php`, for example `'tiles/*'` and `'geojson/*'`.
+Requests with credentials, such as cookies or an `Authorization` header, need more than this header, and the browser sends a preflight `OPTIONS` request first. For those, let Laravel's CORS middleware handle the routes instead: set `cors.allowed_origins` to `null`, run `php artisan config:publish cors` and add your prefixes to `paths` in `config/cors.php`, for example `'tiles/*'` and `'geojson/*'`.
 
 ### GeoJSON Endpoint
 
@@ -280,14 +290,15 @@ Timings cover the SQL query and the MVT encoding, without HTTP and cache. Sampli
 |-----|---------|-------------|
 | `prefix` | `tiles` | URL prefix for tile and TileJSON routes |
 | `middleware` | `[]` | Global middleware for all routes |
-| `throttle` | `60,1` | Rate limit for all routes, see [Rate Limiting](#rate-limiting); `null` turns it off |
+| `throttle` | `null` | Rate limit for tile and TileJSON routes, see [Rate Limiting](#rate-limiting) |
 | `cache.enabled` | `true` | Enable tile caching |
 | `cache.store` | `null` | Cache store (null = default) |
 | `cache.ttl` | `3600` | Cache TTL in seconds, also sent as `max-age` |
-| `cors.allowed_origins` | `*` | `Access-Control-Allow-Origin` of tile responses, see [CORS](#cors); `null` omits it |
+| `cors.allowed_origins` | `*` | `Access-Control-Allow-Origin` of all responses, see [CORS](#cors); `null` omits it |
 | `geojson.prefix` | `geojson` | URL prefix for GeoJSON routes |
 | `geojson.default_limit` | `1000` | Default feature limit |
 | `geojson.max_limit` | `5000` | Maximum feature limit |
+| `geojson.throttle` | `60,1` | Rate limit for the GeoJSON route; without this key, `throttle` applies |
 | `layers` | `[]` | Layer definitions, see [Layer Options](#layer-options) |
 
 ## Testing
