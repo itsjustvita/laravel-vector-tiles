@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\Route;
 use ItsJustVita\VectorTiles\Http\Controllers\GeoJsonController;
 use ItsJustVita\VectorTiles\Http\Controllers\TileController;
 use ItsJustVita\VectorTiles\Http\Controllers\TileJsonController;
+use ItsJustVita\VectorTiles\Http\Middleware\AddCorsHeader;
 use ItsJustVita\VectorTiles\Http\Middleware\ValidateTileRequest;
 use ItsJustVita\VectorTiles\Http\Throttle;
 
@@ -11,6 +12,7 @@ $globalMiddleware = config('vector-tiles.middleware', []);
 
 Route::prefix(config('vector-tiles.prefix', 'tiles'))
     ->middleware(array_merge(
+        [AddCorsHeader::class],
         $globalMiddleware,
         Throttle::middleware(config('vector-tiles.throttle'), 'vector-tiles'),
     ))
@@ -25,6 +27,7 @@ Route::prefix(config('vector-tiles.prefix', 'tiles'))
 
 Route::prefix(config('vector-tiles.geojson.prefix', 'geojson'))
     ->middleware(array_merge(
+        [AddCorsHeader::class],
         $globalMiddleware,
         Throttle::middleware(
             config('vector-tiles.geojson.throttle', config('vector-tiles.throttle')),

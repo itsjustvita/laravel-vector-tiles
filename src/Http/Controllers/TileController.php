@@ -43,11 +43,6 @@ class TileController extends Controller
             'Cache-Control' => "{$visibility}, max-age={$ttl}",
         ];
 
-        $corsOrigin = config('vector-tiles.cors.allowed_origins');
-        if ($corsOrigin !== null && $corsOrigin !== '') {
-            $headers['Access-Control-Allow-Origin'] = $corsOrigin;
-        }
-
         if ($tile === '') {
             return new Response('', 204, $headers);
         }
