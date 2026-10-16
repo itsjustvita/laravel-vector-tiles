@@ -24,15 +24,19 @@ return [
     | Rate Limiting
     |--------------------------------------------------------------------------
     |
-    | Throttle definition applied to tile and geojson routes as
+    | Throttle definition applied to tile and TileJSON routes as
     | "throttle:{value}". Set to null or false to disable.
     |
+    | Maps load many tiles at once, so tiles are not throttled by default.
+    | Requests and minutes are counted separately from other routes of
+    | the application.
+    |
     | Examples:
-    |   '60,1'      => 60 requests per minute
-    |   'api'       => named limiter from a RateLimiter::for() definition
+    |   '600,1'     => 600 requests per minute
+    |   'tiles'     => named limiter from a RateLimiter::for() definition
     |
     */
-    'throttle' => '60,1',
+    'throttle' => null,
 
     /*
     |--------------------------------------------------------------------------
@@ -63,11 +67,17 @@ return [
     |--------------------------------------------------------------------------
     | GeoJSON Endpoint Settings
     |--------------------------------------------------------------------------
+    |
+    | 'throttle' takes the same values as the throttle setting above and
+    | applies to the GeoJSON route. Without this key, the throttle setting
+    | above applies.
+    |
     */
     'geojson' => [
         'prefix' => 'geojson',
         'default_limit' => 1000,
         'max_limit' => 5000,
+        'throttle' => '60,1',
     ],
 
     /*

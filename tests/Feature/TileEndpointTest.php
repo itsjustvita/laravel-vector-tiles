@@ -64,12 +64,12 @@ it('serves cached tile on second request', function () {
         ->assertOk();
 });
 
-it('applies default throttle middleware to tile routes', function () {
+it('applies no throttle middleware to tile routes by default', function () {
     $route = collect($this->app['router']->getRoutes())
         ->first(fn ($r) => $r->uri() === 'tiles/{layer}/{z}/{x}/{y}.mvt');
 
     expect($route)->not->toBeNull();
-    expect($route->gatherMiddleware())->toContain('throttle:60,1');
+    expect(collect($route->gatherMiddleware())->filter(fn ($m) => str_starts_with($m, 'throttle')))->toBeEmpty();
 });
 
 it('applies default throttle middleware to geojson routes', function () {
@@ -77,7 +77,7 @@ it('applies default throttle middleware to geojson routes', function () {
         ->first(fn ($r) => $r->uri() === 'geojson/{layer}');
 
     expect($route)->not->toBeNull();
-    expect($route->gatherMiddleware())->toContain('throttle:60,1');
+    expect($route->gatherMiddleware())->toContain('throttle:60,1,vector-tiles-geojson');
 });
 
 it('uses cache.ttl from config for Cache-Control max-age', function () {
