@@ -192,11 +192,15 @@ Both limits take a number of requests and minutes, the name of a rate limiter, o
 
 Requests to the package routes are counted separately from other throttled routes of your application, and tiles separately from GeoJSON.
 
+Without a limit, anyone who can reach the tile routes can request large numbers of tiles that are not cached yet, and each of them runs a query. For public layers on large tables, set a limit, or rate limit the tile routes in your web server or CDN. `simplify()`, `filterByZoom()` and a `minZoom` that leaves out zoom levels nobody needs keep the cost per tile down.
+
 If you published the config before 0.3.1, it still contains `'throttle' => '60,1'`, which limits tiles to 60 requests per minute and also applies to the GeoJSON endpoint as long as `geojson.throttle` is missing. Set `throttle` to `null` and add `geojson.throttle` to get the new defaults.
 
 ### CORS
 
 All responses of the package routes carry `Access-Control-Allow-Origin: *`, including errors such as `404` or `429`, so maps on other domains can load tiles, TileJSON and GeoJSON. Set `cors.allowed_origins` to a single origin to restrict this, or to `null` to omit the header. An `Access-Control-Allow-Origin` set by your own middleware is kept.
+
+With `*`, any website can read the responses. Browsers do not share responses to requests with credentials, such as cookies, with other origins under `*`, so layers behind a login stay protected. Layers that are protected only by where the request comes from, such as an intranet, a VPN or an IP allowlist, are not: a website opened by someone inside that network could read their data. For such layers, set `cors.allowed_origins` to the origin of your map, for example `'https://maps.example.com'`.
 
 Requests with credentials, such as cookies or an `Authorization` header, need more than this header, and the browser sends a preflight `OPTIONS` request first. For those, let Laravel's CORS middleware handle the routes instead: set `cors.allowed_origins` to `null`, run `php artisan config:publish cors` and add your prefixes to `paths` in `config/cors.php`, for example `'tiles/*'` and `'geojson/*'`.
 
