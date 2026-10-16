@@ -71,11 +71,14 @@ it('does not run ValidateTileRequest for tilejson endpoint', function () {
 });
 
 it('applies throttle middleware from config to tilejson route', function () {
+    config()->set('vector-tiles.throttle', '600,1');
+    reloadTileRoutes();
+
     $route = collect($this->app['router']->getRoutes())
         ->first(fn ($r) => $r->uri() === 'tiles/{layer}.json');
 
     expect($route)->not->toBeNull();
-    expect($route->gatherMiddleware())->toContain('throttle:60,1');
+    expect($route->gatherMiddleware())->toContain('throttle:600,1,vector-tiles');
 });
 
 it('blocks tilejson requests when layer middleware rejects the request', function () {
