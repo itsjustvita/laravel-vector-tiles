@@ -113,7 +113,7 @@ VectorTiles::layer('buildings')
     ->invalidateOn(Building::class);
 ```
 
-Changes inside a database transaction flush the cache once the transaction commits, and not at all when it rolls back.
+Changes inside a database transaction flush the cache right away and again once the transaction commits, so tiles rendered before the commit are not kept.
 
 To flush cached tiles yourself, for example after a bulk import that bypasses model events, use the `TileCache` service:
 
