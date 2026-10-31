@@ -46,6 +46,26 @@ class LayerQueryFactory
     }
 
     /**
+     * Whether building the layer query runs a scope, either the layer's own
+     * or a global scope of its Eloquent model. Only a scope can depend on the
+     * user, so only then can a missing user explain a failure.
+     */
+    public function appliesScopes(Layer $layer): bool
+    {
+        if ($layer->scope !== null) {
+            return true;
+        }
+
+        if (! $layer->source instanceof EloquentBuilder) {
+            return false;
+        }
+
+        $scopes = array_keys($layer->source->getModel()->getGlobalScopes());
+
+        return array_diff($scopes, $layer->source->removedScopes()) !== [];
+    }
+
+    /**
      * Wrap the wheres from $offset on in a nested group when they contain an OR,
      * so constraints added afterwards cannot be bypassed. The where order stays
      * the same, so the flat binding list remains valid.

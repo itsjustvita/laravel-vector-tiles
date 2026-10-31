@@ -70,7 +70,7 @@ class BenchmarkCommand extends Command
 
             return self::FAILURE;
         } catch (Throwable $e) {
-            $this->error('Rendering failed: '.ErrorMessage::reason($e).$this->userHint($user ?? null));
+            $this->error('Rendering failed: '.ErrorMessage::reason($e).$this->userHint($layer, $user ?? null));
 
             return self::FAILURE;
         }
@@ -92,7 +92,7 @@ class BenchmarkCommand extends Command
         try {
             $points = $sampler->points($layer, min(self::MAX_SAMPLE, $perZoom * 20), $bbox, $user);
         } catch (Throwable $e) {
-            throw new InvalidArgumentException('Sampling failed: '.ErrorMessage::reason($e).$this->userHint($user));
+            throw new InvalidArgumentException('Sampling failed: '.ErrorMessage::reason($e).$this->userHint($layer, $user));
         }
 
         if ($points === []) {
@@ -255,8 +255,10 @@ class BenchmarkCommand extends Command
         }
     }
 
-    protected function userHint(?Authenticatable $user): string
+    protected function userHint(Layer $layer, ?Authenticatable $user): string
     {
-        return $user === null ? ' If the layer scope needs a user, pass --user=ID.' : '';
+        return $user === null && $this->laravel->make(LayerQueryFactory::class)->appliesScopes($layer)
+            ? ' If the layer scope needs a user, pass --user=ID.'
+            : '';
     }
 }

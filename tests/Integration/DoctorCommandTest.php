@@ -237,8 +237,14 @@ it('acts as the given user for global scopes that read the authenticated user', 
     };
     VectorTiles::layer('mine')->from($model->newQuery());
 
+    // Without a user first: --user signs the user in for the rest of the process.
+    [$withoutUser, $withoutUserOutput] = runDoctor(['layer' => 'mine']);
     [$exitCode, $output] = runDoctor(['layer' => 'mine', '--user' => '7']);
 
     expect($output)->not->toContain('✗')
-        ->and($exitCode)->toBe(0);
+        ->and($exitCode)->toBe(0)
+        ->and($withoutUser)->toBe(1)
+        ->and($withoutUserOutput)
+        ->toContain('✗ The layer scope failed without a user: Needs an authenticated user.')
+        ->toContain('Pass --user=ID');
 });

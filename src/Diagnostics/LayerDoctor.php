@@ -36,6 +36,10 @@ class LayerDoctor
         try {
             $query = $this->queries->make($layer, $user);
         } catch (Throwable $e) {
+            if (! $this->queries->appliesScopes($layer)) {
+                return [Check::fail('The layer query could not be built: '.$this->reason($e))];
+            }
+
             return [$user === null
                 ? Check::fail('The layer scope failed without a user: '.$this->reason($e), 'Pass --user=ID to run the scope as that user.')
                 : Check::fail('The layer scope failed: '.$this->reason($e))];

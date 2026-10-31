@@ -46,3 +46,15 @@ it('reports a connection that cannot be reached instead of missing postgis', fun
         ->toContain('✗ Cannot connect to connection vt_down')
         ->not->toContain('CREATE EXTENSION');
 });
+
+it('does not blame a scope when the query of a layer without one cannot be built', function () {
+    VectorTiles::layer('trassen')->from('trassen_table')->connection('vt_missing');
+
+    $exitCode = Artisan::call('vector-tiles:doctor');
+
+    expect($exitCode)->toBe(1)
+        ->and(Artisan::output())
+        ->toContain('✗ The layer query could not be built: Database connection [vt_missing] not configured.')
+        ->not->toContain('scope')
+        ->not->toContain('--user');
+});
