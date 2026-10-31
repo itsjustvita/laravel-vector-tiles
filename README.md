@@ -113,6 +113,8 @@ VectorTiles::layer('buildings')
     ->invalidateOn(Building::class);
 ```
 
+Changes inside a database transaction flush the cache once the transaction commits, and not at all when it rolls back.
+
 To flush cached tiles yourself, for example after a bulk import that bypasses model events, use the `TileCache` service:
 
 ```php
@@ -254,8 +256,8 @@ php artisan vector-tiles:doctor roads --strict
 For each layer, on its own connection, the doctor checks:
 
 - that PostGIS 3.0 or newer is installed
-- that the source, the geometry column and all properties exist
-- that the SRID matches the layer
+- that the source, the geometry column and all properties exist and can be read
+- that the geometry column has an SRID and that it matches the layer
 - whether PostgreSQL can use a spatial index for tile queries; for a missing index it prints the matching `CREATE INDEX` statement
 
 ```
