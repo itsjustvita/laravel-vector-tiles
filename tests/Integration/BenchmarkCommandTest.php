@@ -162,3 +162,26 @@ it('reports why sampling failed without the sql statement', function () {
         ->not->toContain('SQLSTATE')
         ->not->toContain('(Connection:');
 });
+
+it('measures on the read connection without connecting the write connection', function () {
+    $config = $this->connectionConfig();
+    // Committed outside the test transaction, so the second connection sees it.
+    $pdo = new PDO("pgsql:host={$config['host']};port={$config['port']};dbname={$config['database']}", $config['username'], $config['password']);
+    $pdo->exec('CREATE TABLE vt_replica_points (id serial PRIMARY KEY, geom geometry(Point, 4326))');
+    $pdo->exec('INSERT INTO vt_replica_points (geom) VALUES (ST_SetSRID(ST_MakePoint(16.37, 48.21), 4326))');
+
+    try {
+        config()->set('database.connections.pgsql_replica', array_merge($config, [
+            'read' => ['host' => $config['host']],
+            'write' => ['host' => '127.0.0.1', 'port' => '1'],
+        ]));
+        VectorTiles::layer('replica')->from('vt_replica_points')->connection('pgsql_replica')->maxZoom(14);
+
+        [$exitCode, $output] = runBenchmark(['layer' => 'replica', '--zoom' => '10', '--tiles' => '1']);
+    } finally {
+        $pdo->exec('DROP TABLE vt_replica_points');
+    }
+
+    expect($output)->not->toContain('failed')
+        ->and($exitCode)->toBe(0);
+});

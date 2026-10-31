@@ -192,8 +192,9 @@ class BenchmarkCommand extends Command
      */
     protected function measure(Layer $layer, TileDriverInterface $driver, LayerQueryFactory $queries, array $tiles, ?Authenticatable $user): array
     {
-        // Connect first, so the first measurement does not include the connection setup.
-        $queries->make($layer, $user)->getConnection()->getPdo();
+        // Connect first, so the first measurement does not include the connection
+        // setup. Tiles render on the read connection, like in a tile request.
+        $queries->make($layer, $user)->getConnection()->getReadPdo();
 
         $measurements = [];
 
