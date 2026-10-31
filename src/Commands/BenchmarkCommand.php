@@ -5,7 +5,6 @@ namespace ItsJustVita\VectorTiles\Commands;
 use Illuminate\Console\Command;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Str;
 use InvalidArgumentException;
 use ItsJustVita\VectorTiles\Benchmark\Summary;
 use ItsJustVita\VectorTiles\Benchmark\TileListFile;
@@ -15,6 +14,7 @@ use ItsJustVita\VectorTiles\Drivers\TileDriverInterface;
 use ItsJustVita\VectorTiles\Layer;
 use ItsJustVita\VectorTiles\Query\BboxFilter;
 use ItsJustVita\VectorTiles\Query\LayerQueryFactory;
+use ItsJustVita\VectorTiles\Support\ErrorMessage;
 use ItsJustVita\VectorTiles\VectorTileManager;
 use Symfony\Component\Console\Output\OutputInterface;
 use Throwable;
@@ -70,7 +70,7 @@ class BenchmarkCommand extends Command
 
             return self::FAILURE;
         } catch (Throwable $e) {
-            $this->error('Rendering failed: '.Str::before($e->getMessage(), "\n").$this->userHint($user ?? null));
+            $this->error('Rendering failed: '.ErrorMessage::reason($e).$this->userHint($user ?? null));
 
             return self::FAILURE;
         }
@@ -92,7 +92,7 @@ class BenchmarkCommand extends Command
         try {
             $points = $sampler->points($layer, min(self::MAX_SAMPLE, $perZoom * 20), $bbox, $user);
         } catch (Throwable $e) {
-            throw new InvalidArgumentException('Sampling failed: '.Str::before($e->getMessage(), "\n").$this->userHint($user));
+            throw new InvalidArgumentException('Sampling failed: '.ErrorMessage::reason($e).$this->userHint($user));
         }
 
         if ($points === []) {

@@ -138,3 +138,27 @@ it('runs a scope that needs a user as the given user', function () {
         ->and($unknownUser)->toBe(1)
         ->and($unknownOutput)->toContain("User '99' not found.");
 });
+
+it('reports why rendering failed without the sql statement', function () {
+    VectorTiles::layer('broken')->from('vt_points')->maxZoom(14)->properties(['nope']);
+
+    [$exitCode, $output] = runBenchmark(['layer' => 'broken', '--zoom' => '10', '--tiles' => '1']);
+
+    expect($exitCode)->toBe(1)
+        ->and($output)
+        ->toContain('Rendering failed: column "nope" does not exist')
+        ->not->toContain('SQLSTATE')
+        ->not->toContain('(Connection:');
+});
+
+it('reports why sampling failed without the sql statement', function () {
+    VectorTiles::layer('broken')->from('vt_points')->maxZoom(14)->scope(fn ($query) => $query->whereRaw('1 / (id - id) = 1'));
+
+    [$exitCode, $output] = runBenchmark(['layer' => 'broken', '--zoom' => '10', '--tiles' => '1']);
+
+    expect($exitCode)->toBe(1)
+        ->and($output)
+        ->toContain('Sampling failed: division by zero')
+        ->not->toContain('SQLSTATE')
+        ->not->toContain('(Connection:');
+});

@@ -10,6 +10,7 @@ use Illuminate\Support\Str;
 use ItsJustVita\VectorTiles\Drivers\PostgisTileDriver;
 use ItsJustVita\VectorTiles\Layer;
 use ItsJustVita\VectorTiles\Query\LayerQueryFactory;
+use ItsJustVita\VectorTiles\Support\ErrorMessage;
 use ItsJustVita\VectorTiles\Support\WebMercator;
 use Throwable;
 
@@ -298,14 +299,8 @@ class LayerDoctor
         }
     }
 
-    /**
-     * The first line of an error message, without the SQLSTATE prefix and
-     * the connection details Laravel appends.
-     */
     protected function reason(Throwable $e): string
     {
-        $line = Str::before(Str::before($e->getMessage(), "\n"), ' (Connection: ');
-
-        return preg_replace('/^SQLSTATE\[\w+\]: .+?: \d+ ERROR:\s+/', '', $line) ?? $line;
+        return ErrorMessage::reason($e);
     }
 }
