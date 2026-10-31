@@ -360,3 +360,19 @@ it('names the source table in the srid hint for a column qualified with its alia
 
     expect($output)->toContain("SELECT UpdateGeometrySRID('vt_raw', 'geom', 4326);");
 });
+
+it('adds the table prefix of the connection to the index and srid hints', function () {
+    $this->createPoints('vt_points', [[16.37, 48.21]], index: false);
+    DB::statement('CREATE TABLE vt_raw (id serial PRIMARY KEY, geom geometry(Point))');
+    DB::insert('INSERT INTO vt_raw (geom) VALUES (ST_MakePoint(16.37, 48.21))');
+    DB::connection()->setTablePrefix('vt_');
+    VectorTiles::layer('points')->from('points');
+    VectorTiles::layer('raw')->from('raw');
+
+    [, $output] = runDoctor();
+
+    expect($output)
+        ->toContain('✓ Source points exists')
+        ->toContain('CREATE INDEX vt_points_geom_idx ON vt_points USING gist (geom);')
+        ->toContain("SELECT UpdateGeometrySRID('vt_raw', 'geom', 4326);");
+});
