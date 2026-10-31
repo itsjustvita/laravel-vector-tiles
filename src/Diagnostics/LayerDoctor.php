@@ -5,6 +5,7 @@ namespace ItsJustVita\VectorTiles\Diagnostics;
 use Closure;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\ConnectionInterface;
+use Illuminate\Database\QueryException;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Str;
 use ItsJustVita\VectorTiles\Drivers\PostgisTileDriver;
@@ -23,6 +24,8 @@ use Throwable;
  */
 class LayerDoctor
 {
+    protected const string UNDEFINED_COLUMN = '42703';
+
     public function __construct(
         protected LayerQueryFactory $queries,
         protected PostgisTileDriver $driver,
@@ -81,7 +84,7 @@ class LayerDoctor
         $checks[] = $geometry;
 
         if (! empty($layer->properties)) {
-            $checks[] = $this->checkProperties($query, $layer);
+            array_push($checks, ...$this->checkProperties($query, $layer));
         }
 
         if ($geometry->status !== CheckStatus::Fail) {
@@ -162,22 +165,34 @@ class LayerDoctor
         return Check::pass("Geometry column {$layer->geometry} (geometry, SRID {$srid})");
     }
 
-    protected function checkProperties(QueryBuilder $query, Layer $layer): Check
+    /**
+     * @return list<Check>
+     */
+    protected function checkProperties(QueryBuilder $query, Layer $layer): array
     {
         $connection = $query->getConnection();
         $missing = [];
+        $unreadable = [];
 
         foreach ($layer->properties as $property) {
             try {
                 $this->probe($connection, fn () => (clone $query)->select([$property])->limit(0)->get());
-            } catch (Throwable) {
-                $missing[] = $property;
+            } catch (Throwable $e) {
+                if ($e instanceof QueryException && $e->getCode() === self::UNDEFINED_COLUMN) {
+                    $missing[] = $property;
+                } else {
+                    $unreadable[] = Check::fail("Property {$property} cannot be read", $this->reason($e));
+                }
             }
         }
 
+        if ($missing === [] && $unreadable === []) {
+            return [Check::pass('Properties: '.implode(', ', $layer->properties))];
+        }
+
         return $missing === []
-            ? Check::pass('Properties: '.implode(', ', $layer->properties))
-            : Check::fail('Missing properties: '.implode(', ', $missing));
+            ? $unreadable
+            : [Check::fail('Missing properties: '.implode(', ', $missing)), ...$unreadable];
     }
 
     /**

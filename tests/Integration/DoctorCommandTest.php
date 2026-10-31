@@ -248,3 +248,21 @@ it('acts as the given user for global scopes that read the authenticated user', 
         ->toContain('✗ The layer scope failed without a user: Needs an authenticated user.')
         ->toContain('Pass --user=ID');
 });
+
+it('gives the reason when a property exists but cannot be read', function () {
+    $this->createPoints('vt_points', [[16.37, 48.21]]);
+    // Roles are transactional, so the test transaction removes it again.
+    DB::statement('CREATE ROLE vt_restricted');
+    DB::statement('GRANT SELECT (id, geom) ON vt_points TO vt_restricted');
+    DB::statement('SET LOCAL ROLE vt_restricted');
+    VectorTiles::layer('points')->from('vt_points')->properties(['id', 'name', 'nope']);
+
+    [$exitCode, $output] = runDoctor(['layer' => 'points']);
+
+    expect($exitCode)->toBe(1)
+        ->and($output)
+        ->toContain('✗ Missing properties: nope')
+        ->toContain('✗ Property name cannot be read')
+        ->toContain('permission denied for table vt_points')
+        ->not->toContain('Missing properties: name');
+});
