@@ -80,7 +80,7 @@ class LayerDoctor
             $checks[] = Check::pass("Source {$table} exists");
         }
 
-        $geometry = $this->checkGeometry($query, $layer);
+        $geometry = $this->checkGeometry($query, $layer, $table);
         $checks[] = $geometry;
 
         if (! empty($layer->properties)) {
@@ -121,7 +121,7 @@ class LayerDoctor
         }
     }
 
-    protected function checkGeometry(QueryBuilder $query, Layer $layer): Check
+    protected function checkGeometry(QueryBuilder $query, Layer $layer, ?string $table): Check
     {
         $connection = $query->getConnection();
         $geometry = $query->getGrammar()->wrap($layer->geometry);
@@ -153,6 +153,13 @@ class LayerDoctor
 
         if ($srid === null) {
             return Check::warn("Column {$layer->geometry} only holds NULL values, so the SRID cannot be checked");
+        }
+
+        if ((int) $srid === 0) {
+            return Check::fail(
+                "Column {$layer->geometry} has no SRID, so its coordinates cannot be transformed",
+                $this->sridHint($query, $layer, $table),
+            );
         }
 
         if ((int) $srid !== (int) $layer->srid) {
@@ -291,6 +298,31 @@ class LayerDoctor
         }
 
         return [$unindexed, $indexed];
+    }
+
+    /**
+     * How to assign an SRID to a column that has none. The layer's SRID is
+     * the best guess for the coordinates, unless it is 0 as well.
+     */
+    protected function sridHint(QueryBuilder $query, Layer $layer, ?string $table): string
+    {
+        $srid = (int) $layer->srid ?: 4326;
+        $intro = (int) $layer->srid === 0
+            ? "Assign the SRID the coordinates are in, for example EPSG:{$srid}, and set it on the layer with ->srid():"
+            : "If the coordinates are in EPSG:{$srid}, assign that SRID:";
+
+        if ($table === null) {
+            return "{$intro}\nST_SetSRID({$layer->geometry}, {$srid}) in the layer source";
+        }
+
+        // [catalog.][schema.]table, as UpdateGeometrySRID() takes them, plus the unqualified column.
+        $names = explode('.', $table);
+        $names[] = $query->getConnection()->getTablePrefix().array_pop($names);
+        $names[] = Str::afterLast($layer->geometry, '.');
+
+        $arguments = implode(', ', array_map(fn (string $name) => "'".str_replace("'", "''", $name)."'", $names));
+
+        return "{$intro}\nSELECT UpdateGeometrySRID({$arguments}, {$srid});";
     }
 
     protected function indexStatement(string $table, Layer $layer): string

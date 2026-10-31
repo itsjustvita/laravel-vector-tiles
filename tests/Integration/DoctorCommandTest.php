@@ -266,3 +266,32 @@ it('gives the reason when a property exists but cannot be read', function () {
         ->toContain('permission denied for table vt_points')
         ->not->toContain('Missing properties: name');
 });
+
+it('suggests assigning an srid when the column has none', function () {
+    DB::statement('CREATE TABLE vt_raw (id serial PRIMARY KEY, geom geometry(Point))');
+    DB::insert('INSERT INTO vt_raw (geom) VALUES (ST_MakePoint(16.37, 48.21))');
+    VectorTiles::layer('raw')->from('vt_raw');
+
+    [$exitCode, $output] = runDoctor(['layer' => 'raw']);
+
+    expect($exitCode)->toBe(1)
+        ->and($output)
+        ->toContain('✗ Column geom has no SRID')
+        ->toContain("SELECT UpdateGeometrySRID('vt_raw', 'geom', 4326);")
+        ->not->toContain('->srid(0)');
+
+    DB::statement("SELECT UpdateGeometrySRID('vt_raw', 'geom', 4326)");
+
+    expect(runDoctor(['layer' => 'raw'])[1])->toContain('✓ Geometry column geom (geometry, SRID 4326)');
+});
+
+it('fails for a column without srid even when the layer is configured with srid 0', function () {
+    DB::statement('CREATE TABLE vt_raw (id serial PRIMARY KEY, geom geometry(Point))');
+    DB::insert('INSERT INTO vt_raw (geom) VALUES (ST_MakePoint(16.37, 48.21))');
+    VectorTiles::layer('raw')->from('vt_raw')->srid(0);
+
+    [$exitCode, $output] = runDoctor(['layer' => 'raw']);
+
+    expect($exitCode)->toBe(1)
+        ->and($output)->toContain('✗ Column geom has no SRID');
+});
