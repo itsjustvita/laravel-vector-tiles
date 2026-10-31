@@ -90,6 +90,51 @@ it('flushes the layer cache when a model registered with invalidateOn changes', 
     expect($cache->get($layer, 14, 8532, 5765))->toBeNull();
 });
 
+it('flushes the layer cache only after the transaction commits', function () {
+    \Illuminate\Support\Facades\Schema::create('fake_models', function (\Illuminate\Database\Schema\Blueprint $table) {
+        $table->id();
+        $table->timestamps();
+    });
+
+    $layer = \ItsJustVita\VectorTiles\Facades\VectorTiles::layer('trassen')
+        ->from('trassen_table')
+        ->invalidateOn(FakeModel::class);
+
+    $cache = app(TileCache::class);
+    $cache->put($layer, 14, 8532, 5765, null, 'stale_tile');
+
+    $insideTransaction = \Illuminate\Support\Facades\DB::transaction(function () use ($cache, $layer) {
+        (new FakeModel)->save();
+
+        return $cache->get($layer, 14, 8532, 5765);
+    });
+
+    // A tile rendered before the commit still sees the old rows, so a flush
+    // at this point would let it be cached as the current version.
+    expect($insideTransaction)->toBe('stale_tile')
+        ->and($cache->get($layer, 14, 8532, 5765))->toBeNull();
+});
+
+it('keeps the layer cache when the transaction rolls back', function () {
+    \Illuminate\Support\Facades\Schema::create('fake_models', function (\Illuminate\Database\Schema\Blueprint $table) {
+        $table->id();
+        $table->timestamps();
+    });
+
+    $layer = \ItsJustVita\VectorTiles\Facades\VectorTiles::layer('trassen')
+        ->from('trassen_table')
+        ->invalidateOn(FakeModel::class);
+
+    $cache = app(TileCache::class);
+    $cache->put($layer, 14, 8532, 5765, null, 'cached_tile');
+
+    \Illuminate\Support\Facades\DB::beginTransaction();
+    (new FakeModel)->save();
+    \Illuminate\Support\Facades\DB::rollBack();
+
+    expect($cache->get($layer, 14, 8532, 5765))->toBe('cached_tile');
+});
+
 class FakeModel extends \Illuminate\Database\Eloquent\Model
 {
     protected $table = 'fake_models';
