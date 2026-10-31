@@ -295,3 +295,20 @@ it('fails for a column without srid even when the layer is configured with srid 
     expect($exitCode)->toBe(1)
         ->and($output)->toContain('✗ Column geom has no SRID');
 });
+
+it('suggests an index statement that postgres accepts and uses', function (string $table, string $source, string $geometry, string $statement) {
+    $this->createPoints($table, [[16.37, 48.21]], index: false);
+    VectorTiles::layer('points')->from($source)->geometry($geometry);
+
+    [, $output] = runDoctor(['layer' => 'points']);
+
+    expect($output)->toContain($statement);
+
+    DB::statement($statement);
+
+    expect(runDoctor(['layer' => 'points'])[1])->toContain('✓ Spatial index is used');
+})->with([
+    'qualified geometry column' => ['vt_points', 'vt_points', 'vt_points.geom', 'CREATE INDEX vt_points_geom_idx ON vt_points USING gist (geom);'],
+    'mixed-case table' => ['"VtPoints"', 'VtPoints', 'geom', 'CREATE INDEX vtpoints_geom_idx ON "VtPoints" USING gist (geom);'],
+    'reserved word as table' => ['"order"', 'order', 'geom', 'CREATE INDEX order_geom_idx ON "order" USING gist (geom);'],
+]);

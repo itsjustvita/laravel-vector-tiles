@@ -234,20 +234,23 @@ class LayerDoctor
             return [Check::pass('Spatial index is used')];
         }
 
+        $connection = $query->getConnection();
+        $source = $table === null ? null : $this->tableNames($query, $table);
+
         if ($unindexed === []) {
             return [Check::warn(
                 'No usable spatial index (the tile filter is missing from the query plan)',
-                $table === null ? null : $this->indexStatement($table, $layer),
+                $source === null ? null : $this->indexStatement($connection, $source, $layer),
             )];
         }
 
-        $sourceName = $table === null ? null : Str::afterLast($table, '.');
+        $sourceName = $source === null ? null : $source[array_key_last($source)];
 
         return array_map(fn (array $node) => Check::warn(
             "No usable spatial index ({$node[0]} on {$node[1]})",
             $node[1] === $sourceName
-                ? $this->indexStatement($table, $layer)
-                : "If {$node[1]} holds the geometry column, index it there:\n".$this->indexStatement($node[1], $layer),
+                ? $this->indexStatement($connection, $source, $layer)
+                : "If {$node[1]} holds the geometry column, index it there:\n".$this->indexStatement($connection, [$node[1]], $layer),
         ), array_values($unindexed));
     }
 
@@ -315,23 +318,69 @@ class LayerDoctor
             return "{$intro}\nST_SetSRID({$layer->geometry}, {$srid}) in the layer source";
         }
 
-        // [catalog.][schema.]table, as UpdateGeometrySRID() takes them, plus the unqualified column.
-        $names = explode('.', $table);
-        $names[] = $query->getConnection()->getTablePrefix().array_pop($names);
-        $names[] = Str::afterLast($layer->geometry, '.');
-
+        // UpdateGeometrySRID() takes [catalog, schema,] table and column as separate names.
+        $names = [...$this->tableNames($query, $table), $this->geometryColumn($layer)];
         $arguments = implode(', ', array_map(fn (string $name) => "'".str_replace("'", "''", $name)."'", $names));
 
         return "{$intro}\nSELECT UpdateGeometrySRID({$arguments}, {$srid});";
     }
 
-    protected function indexStatement(string $table, Layer $layer): string
+    /**
+     * @param  list<string>  $table  [catalog, schema,] table, as stored
+     */
+    protected function indexStatement(ConnectionInterface $connection, array $table, Layer $layer): string
     {
-        $name = str_replace(['.', '"'], ['_', ''], $table).'_'.$layer->geometry;
+        $direct = in_array((int) $layer->srid, [3857, 4326], true);
+        $column = $this->geometryColumn($layer);
+        $name = strtolower((string) preg_replace('/\W+/', '_', implode('_', [...$table, $column]))).($direct ? '' : '_3857').'_idx';
 
-        return in_array((int) $layer->srid, [3857, 4326], true)
-            ? "CREATE INDEX {$name}_idx ON {$table} USING gist ({$layer->geometry});"
-            : "CREATE INDEX {$name}_3857_idx ON {$table} USING gist (ST_Transform({$layer->geometry}, 3857));";
+        $quoted = $this->quoteIdentifiers($connection, [$name, $column, ...$table]);
+        [$name, $column] = $quoted;
+        $table = implode('.', array_slice($quoted, 2));
+
+        return $direct
+            ? "CREATE INDEX {$name} ON {$table} USING gist ({$column});"
+            : "CREATE INDEX {$name} ON {$table} USING gist (ST_Transform({$column}, 3857));";
+    }
+
+    /**
+     * The parts of a source table name as stored: [catalog, schema,] table,
+     * with the connection's table prefix.
+     *
+     * @return list<string>
+     */
+    protected function tableNames(QueryBuilder $query, string $table): array
+    {
+        $names = explode('.', $table);
+        $names[] = $query->getConnection()->getTablePrefix().array_pop($names);
+
+        return $names;
+    }
+
+    /**
+     * The geometry column without the table it may be qualified with.
+     */
+    protected function geometryColumn(Layer $layer): string
+    {
+        return Str::afterLast($layer->geometry, '.');
+    }
+
+    /**
+     * Quotes the names where PostgreSQL needs it, such as for upper case
+     * letters or reserved words, and leaves the others readable.
+     *
+     * @param  list<string>  $names
+     * @return list<string>
+     */
+    protected function quoteIdentifiers(ConnectionInterface $connection, array $names): array
+    {
+        $columns = implode(', ', array_map(fn (int $i) => "quote_ident(?) AS n{$i}", array_keys($names)));
+
+        try {
+            return array_values((array) $this->probe($connection, fn () => $connection->selectOne("SELECT {$columns}", $names)));
+        } catch (Throwable) {
+            return array_map(fn (string $name) => '"'.str_replace('"', '""', $name).'"', $names);
+        }
     }
 
     /**
