@@ -151,4 +151,8 @@ it('knows whether building a layer query runs a scope', function (Closure $layer
 
         protected $table = 'trassen_table';
     })->newQuery()->withoutGlobalScopes()), false],
+    'scope added on the builder' => [fn () => (new Layer('trassen'))->from((new class extends Model
+    {
+        protected $table = 'trassen_table';
+    })->newQuery()->withGlobalScope('tenant', fn ($query) => $query)), true],
 ]);

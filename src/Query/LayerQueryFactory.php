@@ -60,9 +60,11 @@ class LayerQueryFactory
             return false;
         }
 
-        $scopes = array_keys($layer->source->getModel()->getGlobalScopes());
+        // Removing all global scopes from a copy lists the ones still active,
+        // including scopes added on the builder with withGlobalScope().
+        $removed = (clone $layer->source)->withoutGlobalScopes()->removedScopes();
 
-        return array_diff($scopes, $layer->source->removedScopes()) !== [];
+        return array_diff($removed, $layer->source->removedScopes()) !== [];
     }
 
     /**
