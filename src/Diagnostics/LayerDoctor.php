@@ -314,15 +314,58 @@ class LayerDoctor
             ? "Assign the SRID the coordinates are in, for example EPSG:{$srid}, and set it on the layer with ->srid():"
             : "If the coordinates are in EPSG:{$srid}, assign that SRID:";
 
-        if ($table === null) {
-            return "{$intro}\nST_SetSRID({$layer->geometry}, {$srid}) in the layer source";
+        if ($table === null || ! $this->belongsToSource($query, $table, $layer)) {
+            return "{$intro}\nUpdateGeometrySRID() on the table that holds {$layer->geometry}, or ST_SetSRID({$layer->geometry}, {$srid}) in the layer source";
         }
 
-        // UpdateGeometrySRID() takes [catalog, schema,] table and column as separate names.
-        $names = [...$this->tableNames($query, $table), $this->geometryColumn($layer)];
+        // UpdateGeometrySRID() takes [catalog, schema,] table and column as separate
+        // names, and only looks in the current schema for an unqualified table.
+        $names = $this->tableNames($query, $table);
+
+        if (count($names) === 1 && ($schema = $this->schemaOutsideCurrent($query, $table)) !== null) {
+            array_unshift($names, $schema);
+        }
+
+        $names[] = $this->geometryColumn($layer);
         $arguments = implode(', ', array_map(fn (string $name) => "'".str_replace("'", "''", $name)."'", $names));
 
         return "{$intro}\nSELECT UpdateGeometrySRID({$arguments}, {$srid});";
+    }
+
+    /**
+     * Whether the geometry column is one of the source table, and not of a
+     * joined table: unqualified, or qualified with the table or its alias.
+     */
+    protected function belongsToSource(QueryBuilder $query, string $table, Layer $layer): bool
+    {
+        if (! str_contains($layer->geometry, '.')) {
+            return true;
+        }
+
+        $alias = preg_split('/\s+as\s+/i', trim((string) $query->from))[1] ?? null;
+
+        return in_array(Str::beforeLast($layer->geometry, '.'), [$table, Str::afterLast($table, '.'), $alias], true);
+    }
+
+    /**
+     * The schema of the table when it is not the current schema, which happens
+     * for tables found further down the search path.
+     */
+    protected function schemaOutsideCurrent(QueryBuilder $query, string $table): ?string
+    {
+        $connection = $query->getConnection();
+
+        try {
+            $row = $this->probe($connection, fn () => $connection->selectOne(
+                'SELECT n.nspname AS schema, n.nspname = current_schema() AS current'
+                .' FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.oid = to_regclass(?)',
+                [$query->getGrammar()->wrapTable($table)],
+            ));
+        } catch (Throwable) {
+            return null;
+        }
+
+        return $row === null || $row->current ? null : $row->schema;
     }
 
     /**
