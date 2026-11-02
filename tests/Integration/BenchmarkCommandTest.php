@@ -138,3 +138,64 @@ it('runs a scope that needs a user as the given user', function () {
         ->and($unknownUser)->toBe(1)
         ->and($unknownOutput)->toContain("User '99' not found.");
 });
+
+it('reports why rendering failed without the sql statement', function () {
+    VectorTiles::layer('broken')->from('vt_points')->maxZoom(14)->properties(['nope']);
+
+    [$exitCode, $output] = runBenchmark(['layer' => 'broken', '--zoom' => '10', '--tiles' => '1']);
+
+    expect($exitCode)->toBe(1)
+        ->and($output)
+        ->toContain('Rendering failed: column "nope" does not exist')
+        ->not->toContain('SQLSTATE')
+        ->not->toContain('(Connection:');
+});
+
+it('reports why sampling failed without the sql statement', function () {
+    VectorTiles::layer('broken')->from('vt_points')->maxZoom(14)->scope(fn ($query) => $query->whereRaw('1 / (id - id) = 1'));
+
+    [$exitCode, $output] = runBenchmark(['layer' => 'broken', '--zoom' => '10', '--tiles' => '1']);
+
+    expect($exitCode)->toBe(1)
+        ->and($output)
+        ->toContain('Sampling failed: division by zero')
+        ->not->toContain('SQLSTATE')
+        ->not->toContain('(Connection:');
+});
+
+it('measures on the read connection without connecting the write connection', function () {
+    $config = $this->connectionConfig();
+    // Committed outside the test transaction, so the second connection sees it.
+    $pdo = new PDO("pgsql:host={$config['host']};port={$config['port']};dbname={$config['database']}", $config['username'], $config['password']);
+    $pdo->exec('CREATE TABLE vt_replica_points (id serial PRIMARY KEY, geom geometry(Point, 4326))');
+    $pdo->exec('INSERT INTO vt_replica_points (geom) VALUES (ST_SetSRID(ST_MakePoint(16.37, 48.21), 4326))');
+
+    try {
+        config()->set('database.connections.pgsql_replica', array_merge($config, [
+            'read' => ['host' => $config['host']],
+            'write' => ['host' => '127.0.0.1', 'port' => '1'],
+        ]));
+        VectorTiles::layer('replica')->from('vt_replica_points')->connection('pgsql_replica')->maxZoom(14);
+
+        [$exitCode, $output] = runBenchmark(['layer' => 'replica', '--zoom' => '10', '--tiles' => '1']);
+    } finally {
+        $pdo->exec('DROP TABLE vt_replica_points');
+    }
+
+    expect($output)->not->toContain('failed')
+        ->and($exitCode)->toBe(0);
+});
+
+it('samples a position inside the bbox on features that extend beyond it', function () {
+    // The point on the whole line is 15,48.5, outside the bbox.
+    DB::statement('CREATE TABLE vt_lines (id serial PRIMARY KEY, geom geometry(LineString, 4326))');
+    DB::insert("INSERT INTO vt_lines (geom) VALUES (ST_GeomFromText('LINESTRING(10 48.5, 11 48.5, 12 48.5, 13 48.5, 14 48.5, 15 48.5, 16 48.5, 17 48.5, 18 48.5, 19 48.5, 20 48.5)', 4326))");
+    VectorTiles::layer('lines')->from('vt_lines')->maxZoom(14);
+
+    [$exitCode, $output] = runBenchmark(['layer' => 'lines', '--zoom' => '10', '--tiles' => '1', '--bbox' => '16,48,17,49', '--json' => true]);
+    $tiles = array_column(json_decode($output, true)['tiles'] ?? [], 'tile');
+
+    expect($exitCode)->toBe(0)
+        ->and($tiles)->toHaveCount(1)
+        ->and($tiles[0])->toMatch('#^10/55[678]/#');
+});

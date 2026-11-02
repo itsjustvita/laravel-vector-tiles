@@ -20,3 +20,12 @@ it('rejects invalid input with exit code 1', function (array $parameters, string
     'tiles-from with zoom' => [['layer' => 'points', '--tiles-from' => 'tiles.txt', '--zoom' => '8'], '--tiles-from cannot be combined with --zoom, --tiles or --bbox.'],
     'missing tile list' => [['layer' => 'points', '--tiles-from' => '/nonexistent/vt-tiles.txt'], 'Tile list /nonexistent/vt-tiles.txt cannot be read.'],
 ]);
+
+it('does not suggest --user for a layer without a scope', function () {
+    VectorTiles::layer('elsewhere')->from('vt_points')->connection('vt_missing');
+
+    expect(Artisan::call('vector-tiles:benchmark', ['layer' => 'elsewhere']))->toBe(1)
+        ->and(Artisan::output())
+        ->toContain('Sampling failed: Database connection [vt_missing] not configured.')
+        ->not->toContain('--user');
+});

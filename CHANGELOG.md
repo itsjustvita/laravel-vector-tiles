@@ -8,12 +8,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Protected methods of `LayerDoctor` changed: `checkGeometry()` takes the source table, `checkProperties()` returns a list of checks, and `indexStatement()` takes the connection and the table name parts. `BenchmarkCommand::userHint()` takes the layer first.
 - Tiles and TileJSON are no longer throttled by default, because a single map view loads many tiles. The GeoJSON endpoint keeps its limit of 60 requests per minute through the new `geojson.throttle` key, which falls back to `throttle` when it is missing. If you published the config, set `throttle` to `null` to remove the limit for tiles.
 
 ### Fixed
 
 - The TileJSON and GeoJSON endpoints did not send the `cors.allowed_origins` header, so maps on other origins could not load the TileJSON metadata. Error responses such as `404` and `429` now carry it as well.
 - Tile and GeoJSON requests shared their request count with every other route of the application that used the same plain throttle setting.
+- Model changes inside a database transaction flushed the cache of `invalidateOn()` layers only before the commit, so a tile rendered in between could stay cached with the old data until `cache.ttl` expired. The cache is now flushed again after the commit.
+- `vector-tiles:doctor` suggested invalid `CREATE INDEX` statements for qualified geometry columns such as `roads.geom`, for table names with upper case letters, for reserved words such as `order` and for connections with a table prefix.
+- `vector-tiles:doctor` suggested `->srid(0)` for geometry columns without SRID and passed them on layers configured with SRID 0. It now fails and suggests `UpdateGeometrySRID()` for the table that holds the column.
+- `vector-tiles:doctor` reported properties that exist but cannot be read, for example without column privileges, as missing. It now names the reason.
+- `vector-tiles:doctor` and `vector-tiles:benchmark` blamed the layer scope and suggested `--user` for failures of layers without a scope.
+- `vector-tiles:benchmark --bbox` could measure tiles outside the bbox for features that extend beyond it.
+- `vector-tiles:benchmark` connected to the write database of a connection with separate read and write hosts, although tiles render on the read database.
+- `vector-tiles:benchmark` errors contained the SQLSTATE code and the complete SQL statement.
+- Errors of the doctor kept the SQLSTATE prefix when the database server sends messages in another language.
 
 ## [0.3.0] - 2026-10-14
 

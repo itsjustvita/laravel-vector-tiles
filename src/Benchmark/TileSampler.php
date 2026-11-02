@@ -19,6 +19,9 @@ class TileSampler
      * tiles where the layer has data. Ordering by random() scans the layer
      * query once.
      *
+     * With a bbox, features are clipped to it first, so a position on a
+     * feature that extends beyond the bbox still lies inside it.
+     *
      * @param  array{0: float, 1: float, 2: float, 3: float}|null  $bbox
      * @return list<array{0: float, 1: float}>
      */
@@ -38,12 +41,17 @@ class TileSampler
             ->orderByRaw('random()')
             ->limit($limit);
 
+        // ST_ClipByBox2D tolerates invalid geometries, unlike ST_Intersection.
+        $point = $bbox === null
+            ? 'ST_Transform(ST_PointOnSurface(__vt_geom), 4326)'
+            : 'ST_PointOnSurface(ST_ClipByBox2D(ST_Transform(__vt_geom, 4326), ST_MakeEnvelope(?, ?, ?, ?, 4326)))';
+
         $rows = $query->getConnection()->select(
             'SELECT ST_X(__vt_point) AS lon, ST_Y(__vt_point) AS lat FROM ('
-            .'SELECT ST_Transform(ST_PointOnSurface(__vt_geom), 4326) AS __vt_point'
+            ."SELECT {$point} AS __vt_point"
             ." FROM ({$query->toSql()}) AS __vt_sample"
             .') AS __vt_points WHERE NOT ST_IsEmpty(__vt_point)',
-            $query->getBindings(),
+            [...($bbox ?? []), ...$query->getBindings()],
         );
 
         return array_map(fn (object $row) => [(float) $row->lon, (float) $row->lat], $rows);

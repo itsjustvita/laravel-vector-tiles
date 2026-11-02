@@ -237,8 +237,142 @@ it('acts as the given user for global scopes that read the authenticated user', 
     };
     VectorTiles::layer('mine')->from($model->newQuery());
 
+    // Without a user first: --user signs the user in for the rest of the process.
+    [$withoutUser, $withoutUserOutput] = runDoctor(['layer' => 'mine']);
     [$exitCode, $output] = runDoctor(['layer' => 'mine', '--user' => '7']);
 
     expect($output)->not->toContain('✗')
-        ->and($exitCode)->toBe(0);
+        ->and($exitCode)->toBe(0)
+        ->and($withoutUser)->toBe(1)
+        ->and($withoutUserOutput)
+        ->toContain('✗ The layer scope failed without a user: Needs an authenticated user.')
+        ->toContain('Pass --user=ID');
+});
+
+it('gives the reason when a property exists but cannot be read', function () {
+    $this->createPoints('vt_points', [[16.37, 48.21]]);
+    // Roles are transactional, so the test transaction removes it again.
+    DB::statement('CREATE ROLE vt_restricted');
+    DB::statement('GRANT SELECT (id, geom) ON vt_points TO vt_restricted');
+    DB::statement('SET LOCAL ROLE vt_restricted');
+    VectorTiles::layer('points')->from('vt_points')->properties(['id', 'name', 'nope']);
+
+    [$exitCode, $output] = runDoctor(['layer' => 'points']);
+
+    expect($exitCode)->toBe(1)
+        ->and($output)
+        ->toContain('✗ Missing properties: nope')
+        ->toContain('✗ Property name cannot be read')
+        ->toContain('permission denied for table vt_points')
+        ->not->toContain('Missing properties: name');
+});
+
+it('suggests assigning an srid when the column has none', function () {
+    DB::statement('CREATE TABLE vt_raw (id serial PRIMARY KEY, geom geometry(Point))');
+    DB::insert('INSERT INTO vt_raw (geom) VALUES (ST_MakePoint(16.37, 48.21))');
+    VectorTiles::layer('raw')->from('vt_raw');
+
+    [$exitCode, $output] = runDoctor(['layer' => 'raw']);
+
+    expect($exitCode)->toBe(1)
+        ->and($output)
+        ->toContain('✗ Column geom has no SRID')
+        ->toContain("SELECT UpdateGeometrySRID('vt_raw', 'geom', 4326);")
+        ->not->toContain('->srid(0)');
+
+    DB::statement("SELECT UpdateGeometrySRID('vt_raw', 'geom', 4326)");
+
+    expect(runDoctor(['layer' => 'raw'])[1])->toContain('✓ Geometry column geom (geometry, SRID 4326)');
+});
+
+it('fails for a column without srid even when the layer is configured with srid 0', function () {
+    DB::statement('CREATE TABLE vt_raw (id serial PRIMARY KEY, geom geometry(Point))');
+    DB::insert('INSERT INTO vt_raw (geom) VALUES (ST_MakePoint(16.37, 48.21))');
+    VectorTiles::layer('raw')->from('vt_raw')->srid(0);
+
+    [$exitCode, $output] = runDoctor(['layer' => 'raw']);
+
+    expect($exitCode)->toBe(1)
+        ->and($output)->toContain('✗ Column geom has no SRID');
+});
+
+it('suggests an index statement that postgres accepts and uses', function (string $table, string $source, string $geometry, string $statement) {
+    $this->createPoints($table, [[16.37, 48.21]], index: false);
+    VectorTiles::layer('points')->from($source)->geometry($geometry);
+
+    [, $output] = runDoctor(['layer' => 'points']);
+
+    expect($output)->toContain($statement);
+
+    DB::statement($statement);
+
+    expect(runDoctor(['layer' => 'points'])[1])->toContain('✓ Spatial index is used');
+})->with([
+    'qualified geometry column' => ['vt_points', 'vt_points', 'vt_points.geom', 'CREATE INDEX vt_points_geom_idx ON vt_points USING gist (geom);'],
+    'mixed-case table' => ['"VtPoints"', 'VtPoints', 'geom', 'CREATE INDEX vtpoints_geom_idx ON "VtPoints" USING gist (geom);'],
+    'reserved word as table' => ['"order"', 'order', 'geom', 'CREATE INDEX order_geom_idx ON "order" USING gist (geom);'],
+]);
+
+it('does not name the source table in the srid hint for a geometry column of a joined table', function () {
+    DB::statement('CREATE TABLE vt_roads (id serial PRIMARY KEY, geom geometry(Point))');
+    DB::statement('CREATE TABLE vt_road_geoms (road_id integer, geom geometry(Point))');
+    DB::insert('INSERT INTO vt_roads (geom) VALUES (ST_MakePoint(16.37, 48.21))');
+    DB::insert('INSERT INTO vt_road_geoms (road_id, geom) VALUES (1, ST_MakePoint(16.37, 48.21))');
+    $model = new class extends Model
+    {
+        protected $table = 'vt_roads';
+    };
+    VectorTiles::layer('roads')
+        ->from($model->newQuery()->join('vt_road_geoms', 'vt_road_geoms.road_id', '=', 'vt_roads.id'))
+        ->geometry('vt_road_geoms.geom');
+
+    [$exitCode, $output] = runDoctor(['layer' => 'roads']);
+
+    expect($exitCode)->toBe(1)
+        ->and($output)
+        ->toContain('✗ Column vt_road_geoms.geom has no SRID')
+        ->toContain('UpdateGeometrySRID() on the table that holds vt_road_geoms.geom')
+        ->not->toContain("UpdateGeometrySRID('vt_roads'");
+});
+
+it('names the schema in the srid hint when the table is found later in the search path', function () {
+    DB::statement('CREATE SCHEMA vt_other');
+    DB::statement('CREATE TABLE vt_other.vt_raw (id serial PRIMARY KEY, geom geometry(Point))');
+    DB::insert('INSERT INTO vt_other.vt_raw (geom) VALUES (ST_MakePoint(16.37, 48.21))');
+    DB::statement('SET LOCAL search_path = public, vt_other');
+    VectorTiles::layer('raw')->from('vt_raw');
+
+    [, $output] = runDoctor(['layer' => 'raw']);
+
+    expect($output)->toContain("SELECT UpdateGeometrySRID('vt_other', 'vt_raw', 'geom', 4326);");
+
+    DB::statement("SELECT UpdateGeometrySRID('vt_other', 'vt_raw', 'geom', 4326)");
+
+    expect(runDoctor(['layer' => 'raw'])[1])->toContain('✓ Geometry column geom (geometry, SRID 4326)');
+});
+
+it('names the source table in the srid hint for a column qualified with its alias', function () {
+    DB::statement('CREATE TABLE vt_raw (id serial PRIMARY KEY, geom geometry(Point))');
+    DB::insert('INSERT INTO vt_raw (geom) VALUES (ST_MakePoint(16.37, 48.21))');
+    VectorTiles::layer('raw')->from('vt_raw as r')->geometry('r.geom');
+
+    [, $output] = runDoctor(['layer' => 'raw']);
+
+    expect($output)->toContain("SELECT UpdateGeometrySRID('vt_raw', 'geom', 4326);");
+});
+
+it('adds the table prefix of the connection to the index and srid hints', function () {
+    $this->createPoints('vt_points', [[16.37, 48.21]], index: false);
+    DB::statement('CREATE TABLE vt_raw (id serial PRIMARY KEY, geom geometry(Point))');
+    DB::insert('INSERT INTO vt_raw (geom) VALUES (ST_MakePoint(16.37, 48.21))');
+    DB::connection()->setTablePrefix('vt_');
+    VectorTiles::layer('points')->from('points');
+    VectorTiles::layer('raw')->from('raw');
+
+    [, $output] = runDoctor();
+
+    expect($output)
+        ->toContain('✓ Source points exists')
+        ->toContain('CREATE INDEX vt_points_geom_idx ON vt_points USING gist (geom);')
+        ->toContain("SELECT UpdateGeometrySRID('vt_raw', 'geom', 4326);");
 });

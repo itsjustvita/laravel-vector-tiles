@@ -129,3 +129,30 @@ it('ignores the zoom filter without a zoom level', function () {
 
     expect($this->factory->make($layer)->toSql())->toBe('select * from "trassen_table"');
 });
+
+it('knows whether building a layer query runs a scope', function (Closure $layer, bool $expected) {
+    expect($this->factory->appliesScopes($layer()))->toBe($expected);
+})->with([
+    'table without scope' => [fn () => (new Layer('trassen'))->from('trassen_table'), false],
+    'table with scope' => [fn () => (new Layer('trassen'))->from('trassen_table')->scope(fn ($query) => $query), true],
+    'model without global scopes' => [fn () => (new Layer('trassen'))->from((new class extends Model
+    {
+        protected $table = 'trassen_table';
+    })->newQuery()), false],
+    'model with a global scope' => [fn () => (new Layer('trassen'))->from((new class extends Model
+    {
+        use SoftDeletes;
+
+        protected $table = 'trassen_table';
+    })->newQuery()), true],
+    'model with its global scopes removed' => [fn () => (new Layer('trassen'))->from((new class extends Model
+    {
+        use SoftDeletes;
+
+        protected $table = 'trassen_table';
+    })->newQuery()->withoutGlobalScopes()), false],
+    'scope added on the builder' => [fn () => (new Layer('trassen'))->from((new class extends Model
+    {
+        protected $table = 'trassen_table';
+    })->newQuery()->withGlobalScope('tenant', fn ($query) => $query)), true],
+]);

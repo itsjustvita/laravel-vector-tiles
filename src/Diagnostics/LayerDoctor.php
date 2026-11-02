@@ -5,11 +5,13 @@ namespace ItsJustVita\VectorTiles\Diagnostics;
 use Closure;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\ConnectionInterface;
+use Illuminate\Database\QueryException;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Str;
 use ItsJustVita\VectorTiles\Drivers\PostgisTileDriver;
 use ItsJustVita\VectorTiles\Layer;
 use ItsJustVita\VectorTiles\Query\LayerQueryFactory;
+use ItsJustVita\VectorTiles\Support\ErrorMessage;
 use ItsJustVita\VectorTiles\Support\WebMercator;
 use Throwable;
 
@@ -22,6 +24,8 @@ use Throwable;
  */
 class LayerDoctor
 {
+    protected const string UNDEFINED_COLUMN = '42703';
+
     public function __construct(
         protected LayerQueryFactory $queries,
         protected PostgisTileDriver $driver,
@@ -35,6 +39,10 @@ class LayerDoctor
         try {
             $query = $this->queries->make($layer, $user);
         } catch (Throwable $e) {
+            if (! $this->queries->appliesScopes($layer)) {
+                return [Check::fail('The layer query could not be built: '.$this->reason($e))];
+            }
+
             return [$user === null
                 ? Check::fail('The layer scope failed without a user: '.$this->reason($e), 'Pass --user=ID to run the scope as that user.')
                 : Check::fail('The layer scope failed: '.$this->reason($e))];
@@ -72,11 +80,11 @@ class LayerDoctor
             $checks[] = Check::pass("Source {$table} exists");
         }
 
-        $geometry = $this->checkGeometry($query, $layer);
+        $geometry = $this->checkGeometry($query, $layer, $table);
         $checks[] = $geometry;
 
         if (! empty($layer->properties)) {
-            $checks[] = $this->checkProperties($query, $layer);
+            array_push($checks, ...$this->checkProperties($query, $layer));
         }
 
         if ($geometry->status !== CheckStatus::Fail) {
@@ -113,7 +121,7 @@ class LayerDoctor
         }
     }
 
-    protected function checkGeometry(QueryBuilder $query, Layer $layer): Check
+    protected function checkGeometry(QueryBuilder $query, Layer $layer, ?string $table): Check
     {
         $connection = $query->getConnection();
         $geometry = $query->getGrammar()->wrap($layer->geometry);
@@ -147,6 +155,13 @@ class LayerDoctor
             return Check::warn("Column {$layer->geometry} only holds NULL values, so the SRID cannot be checked");
         }
 
+        if ((int) $srid === 0) {
+            return Check::fail(
+                "Column {$layer->geometry} has no SRID, so its coordinates cannot be transformed",
+                $this->sridHint($query, $layer, $table),
+            );
+        }
+
         if ((int) $srid !== (int) $layer->srid) {
             return Check::fail(
                 "Column {$layer->geometry} has SRID {$srid}, layer is configured as {$layer->srid}",
@@ -157,22 +172,34 @@ class LayerDoctor
         return Check::pass("Geometry column {$layer->geometry} (geometry, SRID {$srid})");
     }
 
-    protected function checkProperties(QueryBuilder $query, Layer $layer): Check
+    /**
+     * @return list<Check>
+     */
+    protected function checkProperties(QueryBuilder $query, Layer $layer): array
     {
         $connection = $query->getConnection();
         $missing = [];
+        $unreadable = [];
 
         foreach ($layer->properties as $property) {
             try {
                 $this->probe($connection, fn () => (clone $query)->select([$property])->limit(0)->get());
-            } catch (Throwable) {
-                $missing[] = $property;
+            } catch (Throwable $e) {
+                if ($e instanceof QueryException && $e->getCode() === self::UNDEFINED_COLUMN) {
+                    $missing[] = $property;
+                } else {
+                    $unreadable[] = Check::fail("Property {$property} cannot be read", $this->reason($e));
+                }
             }
         }
 
+        if ($missing === [] && $unreadable === []) {
+            return [Check::pass('Properties: '.implode(', ', $layer->properties))];
+        }
+
         return $missing === []
-            ? Check::pass('Properties: '.implode(', ', $layer->properties))
-            : Check::fail('Missing properties: '.implode(', ', $missing));
+            ? $unreadable
+            : [Check::fail('Missing properties: '.implode(', ', $missing)), ...$unreadable];
     }
 
     /**
@@ -207,20 +234,23 @@ class LayerDoctor
             return [Check::pass('Spatial index is used')];
         }
 
+        $connection = $query->getConnection();
+        $source = $table === null ? null : $this->tableNames($query, $table);
+
         if ($unindexed === []) {
             return [Check::warn(
                 'No usable spatial index (the tile filter is missing from the query plan)',
-                $table === null ? null : $this->indexStatement($table, $layer),
+                $source === null ? null : $this->indexStatement($connection, $source, $layer),
             )];
         }
 
-        $sourceName = $table === null ? null : Str::afterLast($table, '.');
+        $sourceName = $source === null ? null : $source[array_key_last($source)];
 
         return array_map(fn (array $node) => Check::warn(
             "No usable spatial index ({$node[0]} on {$node[1]})",
             $node[1] === $sourceName
-                ? $this->indexStatement($table, $layer)
-                : "If {$node[1]} holds the geometry column, index it there:\n".$this->indexStatement($node[1], $layer),
+                ? $this->indexStatement($connection, $source, $layer)
+                : "If {$node[1]} holds the geometry column, index it there:\n".$this->indexStatement($connection, [$node[1]], $layer),
         ), array_values($unindexed));
     }
 
@@ -273,13 +303,127 @@ class LayerDoctor
         return [$unindexed, $indexed];
     }
 
-    protected function indexStatement(string $table, Layer $layer): string
+    /**
+     * How to assign an SRID to a column that has none. The layer's SRID is
+     * the best guess for the coordinates, unless it is 0 as well.
+     */
+    protected function sridHint(QueryBuilder $query, Layer $layer, ?string $table): string
     {
-        $name = str_replace(['.', '"'], ['_', ''], $table).'_'.$layer->geometry;
+        $srid = (int) $layer->srid ?: 4326;
+        $intro = (int) $layer->srid === 0
+            ? "Assign the SRID the coordinates are in, for example EPSG:{$srid}, and set it on the layer with ->srid():"
+            : "If the coordinates are in EPSG:{$srid}, assign that SRID:";
 
-        return in_array((int) $layer->srid, [3857, 4326], true)
-            ? "CREATE INDEX {$name}_idx ON {$table} USING gist ({$layer->geometry});"
-            : "CREATE INDEX {$name}_3857_idx ON {$table} USING gist (ST_Transform({$layer->geometry}, 3857));";
+        if ($table === null || ! $this->belongsToSource($query, $table, $layer)) {
+            return "{$intro}\nUpdateGeometrySRID() on the table that holds {$layer->geometry}, or ST_SetSRID({$layer->geometry}, {$srid}) in the layer source";
+        }
+
+        // UpdateGeometrySRID() takes [catalog, schema,] table and column as separate
+        // names, and only looks in the current schema for an unqualified table.
+        $names = $this->tableNames($query, $table);
+
+        if (count($names) === 1 && ($schema = $this->schemaOutsideCurrent($query, $table)) !== null) {
+            array_unshift($names, $schema);
+        }
+
+        $names[] = $this->geometryColumn($layer);
+        $arguments = implode(', ', array_map(fn (string $name) => "'".str_replace("'", "''", $name)."'", $names));
+
+        return "{$intro}\nSELECT UpdateGeometrySRID({$arguments}, {$srid});";
+    }
+
+    /**
+     * Whether the geometry column is one of the source table, and not of a
+     * joined table: unqualified, or qualified with the table or its alias.
+     */
+    protected function belongsToSource(QueryBuilder $query, string $table, Layer $layer): bool
+    {
+        if (! str_contains($layer->geometry, '.')) {
+            return true;
+        }
+
+        $alias = preg_split('/\s+as\s+/i', trim((string) $query->from))[1] ?? null;
+
+        return in_array(Str::beforeLast($layer->geometry, '.'), [$table, Str::afterLast($table, '.'), $alias], true);
+    }
+
+    /**
+     * The schema of the table when it is not the current schema, which happens
+     * for tables found further down the search path.
+     */
+    protected function schemaOutsideCurrent(QueryBuilder $query, string $table): ?string
+    {
+        $connection = $query->getConnection();
+
+        try {
+            $row = $this->probe($connection, fn () => $connection->selectOne(
+                'SELECT n.nspname AS schema, n.nspname = current_schema() AS current'
+                .' FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.oid = to_regclass(?)',
+                [$query->getGrammar()->wrapTable($table)],
+            ));
+        } catch (Throwable) {
+            return null;
+        }
+
+        return $row === null || $row->current ? null : $row->schema;
+    }
+
+    /**
+     * @param  list<string>  $table  [catalog, schema,] table, as stored
+     */
+    protected function indexStatement(ConnectionInterface $connection, array $table, Layer $layer): string
+    {
+        $direct = in_array((int) $layer->srid, [3857, 4326], true);
+        $column = $this->geometryColumn($layer);
+        $name = strtolower((string) preg_replace('/\W+/', '_', implode('_', [...$table, $column]))).($direct ? '' : '_3857').'_idx';
+
+        $quoted = $this->quoteIdentifiers($connection, [$name, $column, ...$table]);
+        [$name, $column] = $quoted;
+        $table = implode('.', array_slice($quoted, 2));
+
+        return $direct
+            ? "CREATE INDEX {$name} ON {$table} USING gist ({$column});"
+            : "CREATE INDEX {$name} ON {$table} USING gist (ST_Transform({$column}, 3857));";
+    }
+
+    /**
+     * The parts of a source table name as stored: [catalog, schema,] table,
+     * with the connection's table prefix.
+     *
+     * @return list<string>
+     */
+    protected function tableNames(QueryBuilder $query, string $table): array
+    {
+        $names = explode('.', $table);
+        $names[] = $query->getConnection()->getTablePrefix().array_pop($names);
+
+        return $names;
+    }
+
+    /**
+     * The geometry column without the table it may be qualified with.
+     */
+    protected function geometryColumn(Layer $layer): string
+    {
+        return Str::afterLast($layer->geometry, '.');
+    }
+
+    /**
+     * Quotes the names where PostgreSQL needs it, such as for upper case
+     * letters or reserved words, and leaves the others readable.
+     *
+     * @param  list<string>  $names
+     * @return list<string>
+     */
+    protected function quoteIdentifiers(ConnectionInterface $connection, array $names): array
+    {
+        $columns = implode(', ', array_map(fn (int $i) => "quote_ident(?) AS n{$i}", array_keys($names)));
+
+        try {
+            return array_values((array) $this->probe($connection, fn () => $connection->selectOne("SELECT {$columns}", $names)));
+        } catch (Throwable) {
+            return array_map(fn (string $name) => '"'.str_replace('"', '""', $name).'"', $names);
+        }
     }
 
     /**
@@ -298,14 +442,8 @@ class LayerDoctor
         }
     }
 
-    /**
-     * The first line of an error message, without the SQLSTATE prefix and
-     * the connection details Laravel appends.
-     */
     protected function reason(Throwable $e): string
     {
-        $line = Str::before(Str::before($e->getMessage(), "\n"), ' (Connection: ');
-
-        return preg_replace('/^SQLSTATE\[\w+\]: .+?: \d+ ERROR:\s+/', '', $line) ?? $line;
+        return ErrorMessage::reason($e);
     }
 }

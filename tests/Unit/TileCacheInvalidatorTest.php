@@ -90,6 +90,51 @@ it('flushes the layer cache when a model registered with invalidateOn changes', 
     expect($cache->get($layer, 14, 8532, 5765))->toBeNull();
 });
 
+it('flushes the layer cache again when the transaction commits', function () {
+    \Illuminate\Support\Facades\Schema::create('fake_models', function (\Illuminate\Database\Schema\Blueprint $table) {
+        $table->id();
+        $table->timestamps();
+    });
+
+    $layer = \ItsJustVita\VectorTiles\Facades\VectorTiles::layer('trassen')
+        ->from('trassen_table')
+        ->invalidateOn(FakeModel::class);
+
+    $cache = app(TileCache::class);
+
+    \Illuminate\Support\Facades\DB::transaction(function () use ($cache, $layer) {
+        (new FakeModel)->save();
+
+        // A tile rendered before the commit still sees the old rows.
+        $cache->put($layer, 14, 8532, 5765, null, 'rendered_before_commit');
+    });
+
+    expect($cache->get($layer, 14, 8532, 5765))->toBeNull();
+});
+
+it('flushes the layer cache when a transaction on another connection rolls back', function () {
+    config()->set('database.connections.other', ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '']);
+    \Illuminate\Support\Facades\Schema::create('fake_models', function (\Illuminate\Database\Schema\Blueprint $table) {
+        $table->id();
+        $table->timestamps();
+    });
+
+    $layer = \ItsJustVita\VectorTiles\Facades\VectorTiles::layer('trassen')
+        ->from('trassen_table')
+        ->invalidateOn(FakeModel::class);
+
+    $cache = app(TileCache::class);
+    $cache->put($layer, 14, 8532, 5765, null, 'stale_tile');
+
+    // The model's connection has no transaction, so the change is committed right away.
+    \Illuminate\Support\Facades\DB::connection('other')->beginTransaction();
+    (new FakeModel)->save();
+    \Illuminate\Support\Facades\DB::connection('other')->rollBack();
+
+    expect(FakeModel::count())->toBe(1)
+        ->and($cache->get($layer, 14, 8532, 5765))->toBeNull();
+});
+
 class FakeModel extends \Illuminate\Database\Eloquent\Model
 {
     protected $table = 'fake_models';
